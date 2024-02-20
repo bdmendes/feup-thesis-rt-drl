@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Format Rust
+        run: cargo fmt --check
+
+      - name: Format Shell
+        run: |
+          sudo apt-get install shfmt
+          shfmt -i 4 -d .
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Lint Rust
+        run: cargo clippy --verbose -- -D warnings
+
+      - name: Lint Shell
+        uses: ludeeus/action-shellcheck@2.0.0
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Test Rust
+        run: cargo test
