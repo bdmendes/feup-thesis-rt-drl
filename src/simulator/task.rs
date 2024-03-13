@@ -1,22 +1,18 @@
 pub type TaskId = u32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Task {
     LTask(TaskProps),
     HTask(TaskProps),
-    DRLAgent {
-        id: TaskId,
-        period: u32,
-        deadline: u32,
-    },
+    DRLAgent(TaskProps),
 }
 
 impl Task {
-    pub fn id(&self) -> Option<TaskId> {
+    pub fn props(&self) -> TaskProps {
         match self {
-            Task::LTask(props) => Some(props.id),
-            Task::HTask(props) => Some(props.id),
-            Task::DRLAgent { id, .. } => Some(*id),
+            Task::LTask(props) => props.clone(),
+            Task::HTask(props) => props.clone(),
+            Task::DRLAgent(props) => props.clone(),
         }
     }
 
@@ -26,7 +22,7 @@ impl Task {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TaskProps {
     pub id: TaskId,
     pub wcet_l: u32,

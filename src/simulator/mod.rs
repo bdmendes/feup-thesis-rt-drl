@@ -2,17 +2,11 @@ use self::task::{Task, TaskId};
 
 pub mod task;
 
+#[derive(Debug, Clone, Copy)]
 pub struct SimulatorTask {
-    // Task properties inside the simulator
     task: Task,
     priority: u32,
     expected_execution_time: u32,
-
-    // Internally changed during simulation
-    remaining_execution_time: u32,
-    last_activation_instant: u32,
-    running_for: u32,
-    next_activation_instant: u32,
 }
 
 impl SimulatorTask {
@@ -21,14 +15,6 @@ impl SimulatorTask {
             task: task.clone(),
             priority,
             expected_execution_time,
-            remaining_execution_time: 0,
-            last_activation_instant: 0,
-            running_for: 0,
-            next_activation_instant: match task {
-                Task::LTask(props) => props.offset,
-                Task::HTask(props) => props.offset,
-                _ => unimplemented!("DRLAgent not implemented"),
-            },
         }
     }
 }
@@ -39,99 +25,199 @@ pub enum SimulatorMode {
     HMode,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum TaskEvent {
+    Start(SimulatorTask, u32),
+    End(SimulatorTask, u32),
+}
+
 pub struct Simulator {
-    pub mode: SimulatorMode,
     pub tasks: Vec<SimulatorTask>,
     pub random_execution_time: bool,
 }
 
 impl Simulator {
     pub fn run(&mut self, duration: u32) -> Option<Vec<(Option<TaskId>, SimulatorMode)>> {
+        let mut run_history = vec![];
+        let mut current_running_tasks = vec![];
+        let mut current_mode = SimulatorMode::LMode;
+
+        // Prepare task starts for the duration of the simulation.
+        // The event queue is sorted by task priority.
         self.tasks.sort_by(|a, b| a.priority.cmp(&b.priority));
+        let mut task_events = self
+            .tasks
+            .clone()
+            .into_iter()
+            .flat_map(|task| {
+                let props = task.task.props();
+                (props.offset..duration)
+                    .step_by(props.period as usize)
+                    .map(move |activation_time| TaskEvent::Start(task, activation_time))
+            })
+            .collect::<Vec<_>>();
 
-        let mut running_tasks_ids = Vec::with_capacity(duration as usize);
-        let mut current_running_task = None;
+        // Run the simulation.
+        for time in 0..duration {
+            // Remove tasks ending now
+            current_running_tasks.retain(|(task, _): &(SimulatorTask, u32)| {
+                task_events
+                    .clone()
+                    .into_iter()
+                    .find(|event| match event {
+                        TaskEvent::End(t, instant) => {
+                            t.task.props().id == task.task.props().id && time == *instant
+                        }
+                        _ => false,
+                    })
+                    .is_none()
+            });
+            task_events.retain(|event| match event {
+                TaskEvent::End(_, instant) => time != *instant,
+                _ => true,
+            });
 
-        for current_time in 0..duration {
-            if let Some(task_id) = current_running_task {
-                if let Some(task) = self.tasks.iter_mut().find(|t| t.task.id() == Some(task_id)) {
-                    // Discount the time from the task.
-                    task.remaining_execution_time -= 1;
-                    task.running_for += 1;
+            // Add tasks starting now, according to the current mode
+            let new_tasks = task_events
+                .clone()
+                .into_iter()
+                .filter(|event| match event {
+                    TaskEvent::Start(task, instant) => {
+                        time == *instant
+                            && (matches!(current_mode, SimulatorMode::LMode)
+                                || matches!(task.task, Task::HTask(_)))
+                    }
+                    _ => false,
+                })
+                .map(|event| match event {
+                    TaskEvent::Start(task, _) => (task, 0),
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>();
 
-                    let wcet_l = match &task.task {
-                        Task::LTask(props) => props.wcet_l,
-                        Task::HTask(props) => props.wcet_l,
-                        _ => panic!("Invalid task type"),
-                    };
-                    if self.mode == SimulatorMode::LMode && task.running_for > wcet_l {
-                        // The task running time has surpassed its WCET_L.
-                        // Switch to HMode immediately.
-                        self.mode = SimulatorMode::HMode;
+            current_running_tasks.extend(&new_tasks);
+            current_running_tasks.sort_by(|a, b| a.0.priority.cmp(&b.0.priority));
+
+            // Set end time for each task starting now
+            for task in new_tasks.clone() {
+                // TODO: Implement random execution time
+                let end_time = time + task.0.expected_execution_time;
+                task_events.push(TaskEvent::End(task.0, end_time));
+                println!(
+                    "Task {} activated at {} and will end at {}",
+                    task.0.task.props().id,
+                    time,
+                    end_time
+                );
+            }
+
+            // Adjust preempted tasks end times
+            for new_task in new_tasks {
+                for old_task in current_running_tasks.clone() {
+                    if new_task.0.priority < old_task.0.priority {
+                        // New task preempts old task, so shift old task end time
+                        let old_task_end_time_event = task_events
+                            .iter_mut()
+                            .find(|event| match event {
+                                TaskEvent::End(t, _) => {
+                                    t.task.props().id == old_task.0.task.props().id
+                                }
+                                _ => false,
+                            })
+                            .unwrap();
+                        let old_task_end_time = match old_task_end_time_event {
+                            TaskEvent::End(_, instant) => instant,
+                            _ => unreachable!(),
+                        };
+                        *old_task_end_time_event = TaskEvent::End(
+                            old_task.0,
+                            // TODO: Implement random execution time
+                            *old_task_end_time + new_task.0.expected_execution_time,
+                        );
+                        println!(
+                            "Task {} preempted by {} at {} and will now end at {}",
+                            old_task.0.task.props().id,
+                            new_task.0.task.props().id,
+                            time,
+                            time + old_task.0.expected_execution_time
+                        );
+                    } else if new_task.0.priority > old_task.0.priority {
+                        // Old task preempts new task, so shift new task end time
+                        let new_task_end_time_event = task_events
+                            .iter_mut()
+                            .find(|event| match event {
+                                TaskEvent::End(t, _) => {
+                                    t.task.props().id == new_task.0.task.props().id
+                                }
+                                _ => false,
+                            })
+                            .unwrap();
+                        let new_task_end_time = match new_task_end_time_event {
+                            TaskEvent::End(_, instant) => instant,
+                            _ => unreachable!(),
+                        };
+                        *new_task_end_time_event = TaskEvent::End(
+                            new_task.0,
+                            *new_task_end_time + old_task.0.expected_execution_time - old_task.1,
+                        );
+                        println!(
+                            "Task {} will not run yet, preempted by {} at {} and will now end at {}",
+                            new_task.0.task.props().id,
+                            old_task.0.task.props().id,
+                            time,
+                            time + old_task.0.expected_execution_time
+                        );
                     }
                 }
             }
 
-            // Select the next task to run.
-            for task in &mut self.tasks {
-                let eligible = match self.mode {
-                    SimulatorMode::LMode => true,
-                    SimulatorMode::HMode => matches!(task.task, Task::HTask(_)),
-                };
-                if !eligible {
-                    continue;
+            // Run the most prioritary task for this instant.
+            let running_task = current_running_tasks.first_mut();
+            if let Some((_, running_for)) = running_task {
+                *running_for += 1;
+                run_history.push((Some(running_task.unwrap().0.task.props().id), current_mode));
+            }
+
+            let running_task = current_running_tasks.first().cloned();
+            if let Some((task, running_for)) = running_task {
+                // If the task has surpassed its worst case execution time in L-mode, switch mode
+                if matches!(current_mode, SimulatorMode::LMode)
+                    && running_for > task.task.props().wcet_l
+                {
+                    current_mode = SimulatorMode::HMode;
+                    current_running_tasks.retain(|(t, _)| matches!(t.task, Task::HTask(_)));
+                    println!("Switching to HMode at instant {}", time);
                 }
-
-                if let Task::DRLAgent { .. } = task.task {
-                    unimplemented!("DRLAgent not implemented");
-                }
-
-                let props = match &task.task {
-                    Task::LTask(props) => props,
-                    Task::HTask(props) => props,
-                    _ => panic!("Invalid task type"),
-                };
-
-                let unfinished = task.remaining_execution_time != 0;
-                let surpassed_deadline =
-                    unfinished && current_time - task.last_activation_instant >= props.deadline;
-
-                if surpassed_deadline {
-                    // The system is not schedulable.
+                // If there is another job of the same task already started, the system is not schedulable.
+                if current_running_tasks
+                    .iter()
+                    .filter(|(t, _)| t.task.props().id == task.task.props().id)
+                    .count()
+                    > 1
+                {
                     return None;
                 }
-
-                if unfinished {
-                    // Run the task.
-                    running_tasks_ids.push((Some(props.id), self.mode));
-                    current_running_task = Some(props.id);
-                    break;
-                } else if current_time >= task.next_activation_instant {
-                    // Activate the task.
-                    task.remaining_execution_time = if self.random_execution_time {
-                        Task::sample_execution_time(task.expected_execution_time)
-                    } else {
-                        task.expected_execution_time
-                    };
-                    task.last_activation_instant = current_time;
-                    task.running_for = 0;
-                    running_tasks_ids.push((Some(props.id), self.mode));
-                    current_running_task = Some(props.id);
-                    task.next_activation_instant += props.period;
-                    break;
-                }
+            } else {
+                // No task is running. Switch to LMode.
+                current_mode = SimulatorMode::LMode;
+                run_history.push((None, current_mode));
+                println!("Switching to LMode at instant {}", time);
             }
 
-            // If we have not pushed any task, push None to indicate that no task is running.
-            // We should also switch to LMode.
-            if running_tasks_ids.len() <= current_time as usize {
-                running_tasks_ids.push((None, self.mode));
-                self.mode = SimulatorMode::LMode;
-                current_running_task = None;
-            }
+            println!(
+                "task start events pending: {:?}",
+                task_events
+                    .iter()
+                    .filter(|e| matches!(e, TaskEvent::Start(_, _)))
+                    .map(|e| match e {
+                        TaskEvent::Start(t, instant) => (t.task.props().id, *instant),
+                        _ => unreachable!(),
+                    })
+                    .collect::<Vec<_>>()
+            );
         }
 
-        Some(running_tasks_ids)
+        Some(run_history)
     }
 }
 
@@ -168,7 +254,6 @@ mod tests {
         );
 
         let mut simulator = Simulator {
-            mode: super::SimulatorMode::LMode,
             tasks: vec![task1, task2],
             random_execution_time: false,
         };
@@ -219,7 +304,6 @@ mod tests {
         );
 
         let mut simulator = Simulator {
-            mode: super::SimulatorMode::LMode,
             tasks: vec![task1, task2],
             random_execution_time: false,
         };
@@ -268,7 +352,6 @@ mod tests {
         );
 
         let mut simulator = Simulator {
-            mode: super::SimulatorMode::LMode,
             tasks: vec![task1, task2],
             random_execution_time: false,
         };
@@ -282,12 +365,13 @@ mod tests {
                 (Some(1), super::SimulatorMode::LMode),
                 (Some(2), super::SimulatorMode::HMode),
                 (Some(2), super::SimulatorMode::HMode),
-                (None, super::SimulatorMode::HMode),
+                (None, super::SimulatorMode::LMode),
+                (None, super::SimulatorMode::LMode),
+                (Some(2), super::SimulatorMode::LMode),
+                (Some(2), super::SimulatorMode::LMode),
+                (None, super::SimulatorMode::LMode),
                 (Some(1), super::SimulatorMode::LMode),
                 (Some(1), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::HMode),
-                (Some(2), super::SimulatorMode::HMode),
             ]
         );
     }
