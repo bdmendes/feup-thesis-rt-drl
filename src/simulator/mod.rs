@@ -1,5 +1,6 @@
 use self::task::{Task, TaskId};
 
+pub mod schedulability;
 pub mod task;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
