@@ -67,7 +67,7 @@ impl<'a> Simulator<'a> {
         // Run the simulation.
         for time in 0..duration {
             // Determine tasks starting now, according to the current mode
-            let new_tasks = task_start_events
+            let new_jobs = task_start_events
                 .iter()
                 .filter(|event| match event {
                     SimulatorEvent::Start(task, instant) => {
@@ -91,9 +91,22 @@ impl<'a> Simulator<'a> {
                 })
                 .collect::<Vec<_>>();
 
-            // Add new tasks to current jobs
-            current_running_jobs.extend(&new_tasks);
+            // Add new jobs to current jobs
+            current_running_jobs.extend(&new_jobs);
             current_running_jobs.sort_by(|a, b| a.task.priority.cmp(&b.task.priority));
+
+            // Check for multiple jobs for the same tasks.
+            // This can't happen since we're assuming D=T.
+            for job in &current_running_jobs {
+                if current_running_jobs
+                    .iter()
+                    .filter(|j| j.task.task.props().id == job.task.task.props().id)
+                    .count()
+                    > 1
+                {
+                    return (None, simulator_events_history);
+                }
+            }
 
             // Update the most prioritary job for this instant.
             if let Some(job) = current_running_jobs.first_mut() {
@@ -117,11 +130,6 @@ impl<'a> Simulator<'a> {
                     };
                     let new_instant = *previous_instant + job.task.task.props().period;
                     *this_task_start_event = SimulatorEvent::Start(job.task, new_instant);
-
-                    // If new instant has passed, the system is not schedulable.
-                    if new_instant <= time {
-                        return (None, simulator_events_history);
-                    }
                 }
 
                 job.running_for += 1;
@@ -457,6 +465,111 @@ mod tests {
                 SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 8),
                 SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 11)
             ]
+        );
+    }
+
+    #[test]
+    fn non_feasible_simple() {
+        let task1 = SimulatorTask::new(
+            &super::task::Task::LTask(TaskProps {
+                id: 1,
+                wcet_l: 1,
+                wcet_h: 1,
+                offset: 1,
+                period: 3,
+            }),
+            1,
+            1,
+        );
+        let task2 = SimulatorTask::new(
+            &super::task::Task::LTask(TaskProps {
+                id: 2,
+                wcet_l: 3,
+                wcet_h: 3,
+                offset: 0,
+                period: 3,
+            }),
+            2,
+            3,
+        );
+
+        let mut simulator = Simulator {
+            tasks: vec![task1, task2],
+            random_execution_time: false,
+        };
+        let (tasks, events) = simulator.run(10);
+
+        assert_eq!(tasks, None);
+        assert_eq!(events, vec![]);
+    }
+
+    #[test]
+    fn non_feasible_mode_change() {
+        let task1 = SimulatorTask::new(
+            &super::task::Task::HTask(TaskProps {
+                id: 1,
+                wcet_l: 2,
+                wcet_h: 3,
+                offset: 0,
+                period: 4,
+            }),
+            1,
+            3,
+        );
+        let task2 = SimulatorTask::new(
+            &super::task::Task::HTask(TaskProps {
+                id: 2,
+                wcet_l: 3,
+                wcet_h: 3,
+                offset: 2,
+                period: 5,
+            }),
+            2,
+            2,
+        );
+
+        let mut simulator = Simulator {
+            tasks: vec![task1, task2],
+            random_execution_time: false,
+        };
+        let (tasks, events) = simulator.run(10);
+
+        assert_eq!(tasks, None);
+        assert_eq!(
+            events,
+            vec![SimulatorEvent::ModeChange(
+                crate::simulator::SimulatorMode::HMode,
+                1
+            )]
+        );
+    }
+
+    #[test]
+    fn non_feasible_exceed_wcet_h() {
+        let task1 = SimulatorTask::new(
+            &super::task::Task::HTask(TaskProps {
+                id: 1,
+                wcet_l: 2,
+                wcet_h: 3,
+                offset: 0,
+                period: 4,
+            }),
+            1,
+            4,
+        );
+        let mut simulator = Simulator {
+            tasks: vec![task1],
+            random_execution_time: false,
+        };
+        let (tasks, events) = simulator.run(10);
+
+        assert_eq!(tasks, None);
+        assert_eq!(
+            events,
+            vec![SimulatorEvent::ModeChange(
+                crate::simulator::SimulatorMode::HMode,
+                1
+            )]
         );
     }
 }
