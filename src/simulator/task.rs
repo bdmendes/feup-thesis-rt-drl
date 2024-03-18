@@ -1,6 +1,6 @@
 pub type TaskId = u32;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Task {
     LTask(TaskProps),
     HTask(TaskProps),
@@ -20,14 +20,15 @@ impl Task {
         // TODO: Implement random execution time
         expected_execution_time
     }
+
+    pub fn activate(&self) {}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TaskProps {
     pub id: TaskId,
     pub wcet_l: u32,
     pub wcet_h: u32,
     pub offset: u32,
     pub period: u32,
-    pub deadline: u32,
 }

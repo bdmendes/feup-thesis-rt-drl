@@ -2,21 +2,28 @@ use self::task::{Task, TaskId};
 
 pub mod task;
 
-#[derive(Debug, Clone, Copy)]
-pub struct SimulatorTask {
-    task: Task,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SimulatorTask<'a> {
+    task: &'a Task,
     priority: u32,
     expected_execution_time: u32,
 }
 
-impl SimulatorTask {
-    pub fn new(task: Task, priority: u32, expected_execution_time: u32) -> Self {
+impl<'a> SimulatorTask<'a> {
+    pub fn new(task: &'a Task, priority: u32, expected_execution_time: u32) -> Self {
         Self {
-            task: task.clone(),
+            task,
             priority,
             expected_execution_time,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SimulatorJob<'a> {
+    task: SimulatorTask<'a>,
+    running_for: u32,
+    remaining: u32,
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -25,229 +32,174 @@ pub enum SimulatorMode {
     HMode,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum TaskEvent {
-    Start(SimulatorTask, u32),
-    End(SimulatorTask, u32),
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum SimulatorEvent<'a> {
+    Start(SimulatorTask<'a>, u32),
+    TaskKill(SimulatorTask<'a>, u32),
+    ModeChange(SimulatorMode, u32),
 }
 
-pub struct Simulator {
-    pub tasks: Vec<SimulatorTask>,
+pub struct Simulator<'a> {
+    pub tasks: Vec<SimulatorTask<'a>>,
     pub random_execution_time: bool,
 }
 
-impl Simulator {
-    pub fn run(&mut self, duration: u32) -> Option<Vec<(Option<TaskId>, SimulatorMode)>> {
+impl<'a> Simulator<'a> {
+    pub fn run(&mut self, duration: u32) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent<'a>>) {
         let mut run_history = vec![];
-        let mut current_running_tasks = vec![];
+        let mut simulator_events_history = vec![];
         let mut current_mode = SimulatorMode::LMode;
+        let mut current_running_jobs = Vec::<SimulatorJob>::new();
 
-        // Prepare task starts for the duration of the simulation.
-        // The event queue is sorted by task priority.
-        self.tasks.sort_by(|a, b| a.priority.cmp(&b.priority));
-        let mut task_events = self
+        // Prepare the first start events.
+        let mut task_start_events = self
             .tasks
-            .clone()
-            .into_iter()
+            .iter()
             .flat_map(|task| {
                 let props = task.task.props();
                 (props.offset..duration)
                     .step_by(props.period as usize)
-                    .map(move |activation_time| TaskEvent::Start(task, activation_time))
+                    .next()
+                    .map(move |activation_time| SimulatorEvent::Start(*task, activation_time))
             })
             .collect::<Vec<_>>();
 
         // Run the simulation.
         for time in 0..duration {
-            // Remove tasks ending now
-            current_running_tasks.retain(|(task, _): &(SimulatorTask, u32)| {
-                task_events
-                    .clone()
-                    .into_iter()
-                    .find(|event| match event {
-                        TaskEvent::End(t, instant) => {
-                            t.task.props().id == task.task.props().id && time == *instant
-                        }
-                        _ => false,
-                    })
-                    .is_none()
-            });
-            task_events.retain(|event| match event {
-                TaskEvent::End(_, instant) => time != *instant,
-                _ => true,
-            });
-
-            // Add tasks starting now, according to the current mode
-            let new_tasks = task_events
-                .clone()
-                .into_iter()
+            // Determine tasks starting now, according to the current mode
+            let new_tasks = task_start_events
+                .iter()
                 .filter(|event| match event {
-                    TaskEvent::Start(task, instant) => {
+                    SimulatorEvent::Start(task, instant) => {
                         time == *instant
                             && (matches!(current_mode, SimulatorMode::LMode)
                                 || matches!(task.task, Task::HTask(_)))
                     }
-                    _ => false,
+                    _ => unreachable!(),
                 })
                 .map(|event| match event {
-                    TaskEvent::Start(task, _) => (task, 0),
+                    SimulatorEvent::Start(task, _) => SimulatorJob {
+                        task: *task,
+                        running_for: 0,
+                        remaining: if self.random_execution_time {
+                            Task::sample_execution_time(task.expected_execution_time)
+                        } else {
+                            task.expected_execution_time
+                        },
+                    },
                     _ => unreachable!(),
                 })
                 .collect::<Vec<_>>();
 
-            current_running_tasks.extend(&new_tasks);
-            current_running_tasks.sort_by(|a, b| a.0.priority.cmp(&b.0.priority));
+            // Add new tasks to current jobs
+            current_running_jobs.extend(&new_tasks);
+            current_running_jobs.sort_by(|a, b| a.task.priority.cmp(&b.task.priority));
 
-            // Set end time for each task starting now
-            for task in new_tasks.clone() {
-                // TODO: Implement random execution time
-                let end_time = time + task.0.expected_execution_time;
-                task_events.push(TaskEvent::End(task.0, end_time));
-                println!(
-                    "Task {} activated at {} and will end at {}",
-                    task.0.task.props().id,
-                    time,
-                    end_time
-                );
-            }
+            // Update the most prioritary job for this instant.
+            if let Some(job) = current_running_jobs.first_mut() {
+                if job.running_for == 0 {
+                    // Activate the task.
+                    job.task.task.activate();
 
-            // Adjust preempted tasks end times
-            for new_task in new_tasks {
-                for old_task in current_running_tasks.clone() {
-                    if new_task.0.priority < old_task.0.priority {
-                        // New task preempts old task, so shift old task end time
-                        let old_task_end_time_event = task_events
-                            .iter_mut()
-                            .find(|event| match event {
-                                TaskEvent::End(t, _) => {
-                                    t.task.props().id == old_task.0.task.props().id
-                                }
-                                _ => false,
-                            })
-                            .unwrap();
-                        let old_task_end_time = match old_task_end_time_event {
-                            TaskEvent::End(_, instant) => instant,
+                    // Schedule the next start event.
+                    let this_task_start_event = task_start_events
+                        .iter_mut()
+                        .find(|e| match e {
+                            SimulatorEvent::Start(t, _) => {
+                                t.task.props().id == job.task.task.props().id
+                            }
                             _ => unreachable!(),
-                        };
-                        *old_task_end_time_event = TaskEvent::End(
-                            old_task.0,
-                            // TODO: Implement random execution time
-                            *old_task_end_time + new_task.0.expected_execution_time,
-                        );
-                        println!(
-                            "Task {} preempted by {} at {} and will now end at {}",
-                            old_task.0.task.props().id,
-                            new_task.0.task.props().id,
-                            time,
-                            time + old_task.0.expected_execution_time
-                        );
-                    } else if new_task.0.priority > old_task.0.priority {
-                        // Old task preempts new task, so shift new task end time
-                        let new_task_end_time_event = task_events
-                            .iter_mut()
-                            .find(|event| match event {
-                                TaskEvent::End(t, _) => {
-                                    t.task.props().id == new_task.0.task.props().id
-                                }
-                                _ => false,
-                            })
-                            .unwrap();
-                        let new_task_end_time = match new_task_end_time_event {
-                            TaskEvent::End(_, instant) => instant,
-                            _ => unreachable!(),
-                        };
-                        *new_task_end_time_event = TaskEvent::End(
-                            new_task.0,
-                            *new_task_end_time + old_task.0.expected_execution_time - old_task.1,
-                        );
-                        println!(
-                            "Task {} will not run yet, preempted by {} at {} and will now end at {}",
-                            new_task.0.task.props().id,
-                            old_task.0.task.props().id,
-                            time,
-                            time + old_task.0.expected_execution_time
-                        );
+                        })
+                        .unwrap();
+                    let previous_instant = match this_task_start_event {
+                        SimulatorEvent::Start(_, instant) => instant,
+                        _ => unreachable!(),
+                    };
+                    let new_instant = *previous_instant + job.task.task.props().period;
+                    *this_task_start_event = SimulatorEvent::Start(job.task, new_instant);
+
+                    // If new instant has passed, the system is not schedulable.
+                    if new_instant <= time {
+                        return (None, simulator_events_history);
                     }
                 }
+
+                job.running_for += 1;
+                job.remaining -= 1;
+                run_history.push(Some(job.task.task.props().id));
             }
 
-            // Run the most prioritary task for this instant.
-            let running_task = current_running_tasks.first_mut();
-            if let Some((_, running_for)) = running_task {
-                *running_for += 1;
-                run_history.push((Some(running_task.unwrap().0.task.props().id), current_mode));
-            }
-
-            let running_task = current_running_tasks.first().cloned();
-            if let Some((task, running_for)) = running_task {
-                // If the task has surpassed its worst case execution time in L-mode, switch mode
-                if matches!(current_mode, SimulatorMode::LMode)
-                    && running_for > task.task.props().wcet_l
+            if let Some(job) = current_running_jobs.first().cloned() {
+                if job.remaining == 0 {
+                    // Job has ended. Remove it.
+                    current_running_jobs
+                        .retain(|j| j.task.task.props().id != job.task.task.props().id);
+                } else if matches!(current_mode, SimulatorMode::HMode)
+                    && job.running_for >= job.task.task.props().wcet_h
                 {
-                    current_mode = SimulatorMode::HMode;
-                    current_running_tasks.retain(|(t, _)| matches!(t.task, Task::HTask(_)));
-                    println!("Switching to HMode at instant {}", time);
-                }
-                // If there is another job of the same task already started, the system is not schedulable.
-                if current_running_tasks
-                    .iter()
-                    .filter(|(t, _)| t.task.props().id == task.task.props().id)
-                    .count()
-                    > 1
+                    // Task has surpassed its worst case execution time in H-mode.
+                    // The system is not schedulable.
+                    return (None, simulator_events_history);
+                } else if matches!(current_mode, SimulatorMode::LMode)
+                    && job.running_for >= job.task.task.props().wcet_l
                 {
-                    return None;
+                    // Task has surpassed its worst case execution time in L-mode
+                    if matches!(job.task.task, Task::HTask(_)) {
+                        // This is a HTask. We must switch mode immediately.
+                        current_mode = SimulatorMode::HMode;
+                        current_running_jobs.retain(|job| matches!(job.task.task, Task::HTask(_)));
+                        simulator_events_history
+                            .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
+                    } else {
+                        // We could go about this in some ways, but in an attempt to try to preserve
+                        // more LTasks, we only kill the current job.
+                        current_running_jobs
+                            .retain(|j| j.task.task.props().id != job.task.task.props().id);
+                        simulator_events_history.push(SimulatorEvent::TaskKill(job.task, time));
+                    }
                 }
             } else {
-                // No task is running. Switch to LMode.
-                current_mode = SimulatorMode::LMode;
-                run_history.push((None, current_mode));
-                println!("Switching to LMode at instant {}", time);
+                if current_mode != SimulatorMode::LMode {
+                    // No task is running. Switch to LMode.
+                    current_mode = SimulatorMode::LMode;
+                    simulator_events_history
+                        .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
+                }
+                run_history.push(None);
             }
-
-            println!(
-                "task start events pending: {:?}",
-                task_events
-                    .iter()
-                    .filter(|e| matches!(e, TaskEvent::Start(_, _)))
-                    .map(|e| match e {
-                        TaskEvent::Start(t, instant) => (t.task.props().id, *instant),
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>()
-            );
         }
 
-        Some(run_history)
+        (Some(run_history), simulator_events_history)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::simulator::SimulatorEvent;
+
     use super::{task::TaskProps, Simulator, SimulatorTask};
 
     #[test]
 
-    fn same_mode_feasible() {
+    fn same_criticality() {
         let task1 = SimulatorTask::new(
-            super::task::Task::LTask(TaskProps {
+            &super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
                 wcet_h: 1,
                 offset: 1,
                 period: 4,
-                deadline: 3,
             }),
             1,
             1,
         );
         let task2 = SimulatorTask::new(
-            super::task::Task::LTask(TaskProps {
+            &super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 4,
-                deadline: 3,
             }),
             2,
             2,
@@ -257,47 +209,109 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
         };
-        let running_tasks = simulator.run(10).unwrap();
+        let (tasks, events) = simulator.run(10);
 
         assert_eq!(
-            running_tasks,
+            tasks.unwrap(),
             vec![
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (None, super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (None, super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
+                Some(2),
+                Some(1),
+                Some(2),
+                None,
+                Some(2),
+                Some(1),
+                Some(2),
+                None,
+                Some(2),
+                Some(1),
             ]
         );
+
+        assert_eq!(events, vec![]);
     }
 
     #[test]
-    fn different_modes_feasible_no_mode_change() {
+
+    fn same_criticality_2() {
         let task1 = SimulatorTask::new(
-            super::task::Task::HTask(TaskProps {
+            &super::task::Task::LTask(TaskProps {
+                id: 1,
+                wcet_l: 2,
+                wcet_h: 2,
+                offset: 1,
+                period: 5,
+            }),
+            2,
+            2,
+        );
+        let task2 = SimulatorTask::new(
+            &super::task::Task::LTask(TaskProps {
+                id: 2,
+                wcet_l: 2,
+                wcet_h: 2,
+                offset: 0,
+                period: 5,
+            }),
+            3,
+            2,
+        );
+        let task3 = SimulatorTask::new(
+            &super::task::Task::LTask(TaskProps {
+                id: 3,
+                wcet_l: 1,
+                wcet_h: 1,
+                offset: 1,
+                period: 5,
+            }),
+            1,
+            1,
+        );
+
+        let mut simulator = Simulator {
+            tasks: vec![task1, task2, task3],
+            random_execution_time: false,
+        };
+        let (tasks, events) = simulator.run(10);
+
+        assert_eq!(
+            tasks.unwrap(),
+            vec![
+                Some(2),
+                Some(3),
+                Some(1),
+                Some(1),
+                Some(2),
+                Some(2),
+                Some(3),
+                Some(1),
+                Some(1),
+                Some(2),
+            ]
+        );
+
+        assert_eq!(events, vec![]);
+    }
+
+    #[test]
+    fn different_criticality() {
+        let task1 = SimulatorTask::new(
+            &super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
                 wcet_h: 1,
                 offset: 1,
                 period: 3,
-                deadline: 3,
             }),
             1,
             1,
         );
         let task2 = SimulatorTask::new(
-            super::task::Task::LTask(TaskProps {
+            &super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 3,
-                deadline: 3,
             }),
             2,
             2,
@@ -307,45 +321,45 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
         };
-        let running_tasks = simulator.run(8).unwrap();
+        let (tasks, events) = simulator.run(8);
 
         assert_eq!(
-            running_tasks,
+            tasks.unwrap(),
             vec![
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
+                Some(2),
+                Some(1),
+                Some(2),
+                Some(2),
+                Some(1),
+                Some(2),
+                Some(2),
+                Some(1),
             ]
         );
+
+        assert_eq!(events, vec![]);
     }
 
     #[test]
-    fn different_modes_feasible_mode_change() {
+    fn different_criticality_task_kill() {
         let task1 = SimulatorTask::new(
-            super::task::Task::LTask(TaskProps {
+            &super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
                 wcet_h: 0,
                 offset: 0,
                 period: 5,
-                deadline: 5,
             }),
             1,
             3,
         );
         let task2 = SimulatorTask::new(
-            super::task::Task::HTask(TaskProps {
+            &super::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 3,
                 offset: 2,
                 period: 5,
-                deadline: 3,
             }),
             2,
             2,
@@ -355,23 +369,93 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
         };
-        let running_tasks = simulator.run(12).unwrap();
+        let (tasks, events) = simulator.run(12);
 
         assert_eq!(
-            running_tasks,
+            tasks.unwrap(),
             vec![
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::HMode),
-                (Some(2), super::SimulatorMode::HMode),
-                (None, super::SimulatorMode::LMode),
-                (None, super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (Some(2), super::SimulatorMode::LMode),
-                (None, super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
-                (Some(1), super::SimulatorMode::LMode),
+                Some(1),
+                Some(1),
+                Some(2),
+                Some(2),
+                None,
+                Some(1),
+                Some(1),
+                Some(2),
+                Some(2),
+                None,
+                Some(1),
+                Some(1),
+            ]
+        );
+
+        assert_eq!(
+            events,
+            vec![
+                SimulatorEvent::TaskKill(task1, 1),
+                SimulatorEvent::TaskKill(task1, 6),
+                SimulatorEvent::TaskKill(task1, 11),
+            ]
+        );
+    }
+
+    #[test]
+    fn different_criticality_mode_change() {
+        let task1 = SimulatorTask::new(
+            &super::task::Task::HTask(TaskProps {
+                id: 1,
+                wcet_l: 2,
+                wcet_h: 3,
+                offset: 0,
+                period: 5,
+            }),
+            1,
+            3,
+        );
+        let task2 = SimulatorTask::new(
+            &super::task::Task::LTask(TaskProps {
+                id: 2,
+                wcet_l: 2,
+                wcet_h: 3,
+                offset: 2,
+                period: 5,
+            }),
+            2,
+            2,
+        );
+
+        let mut simulator = Simulator {
+            tasks: vec![task1, task2],
+            random_execution_time: false,
+        };
+        let (tasks, events) = simulator.run(12);
+
+        assert_eq!(
+            tasks.unwrap(),
+            vec![
+                Some(1),
+                Some(1),
+                Some(1),
+                None,
+                None,
+                Some(1),
+                Some(1),
+                Some(1),
+                None,
+                None,
+                Some(1),
+                Some(1),
+            ]
+        );
+
+        assert_eq!(
+            events,
+            vec![
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 1),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 3),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 6),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 8),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 11)
             ]
         );
     }
