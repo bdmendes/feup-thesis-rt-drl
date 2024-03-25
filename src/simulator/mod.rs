@@ -1,7 +1,7 @@
 use self::task::{Task, TaskId};
 
-pub mod schedulability;
 pub mod task;
+pub mod validation;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SimulatorTask<'a> {

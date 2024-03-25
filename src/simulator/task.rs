@@ -1,3 +1,5 @@
+use super::SimulatorMode;
+
 pub type TaskId = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -31,4 +33,13 @@ pub struct TaskProps {
     pub wcet_h: u32,
     pub offset: u32,
     pub period: u32,
+}
+
+impl TaskProps {
+    pub fn wcet_in_mode(&self, mode: SimulatorMode) -> u32 {
+        match mode {
+            SimulatorMode::LMode => self.wcet_l,
+            SimulatorMode::HMode => self.wcet_h,
+        }
+    }
 }

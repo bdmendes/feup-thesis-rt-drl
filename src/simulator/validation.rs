@@ -1,16 +1,16 @@
 use super::{task::Task, SimulatorMode, SimulatorTask};
 
-pub fn feasible_schedule(tasks: &Vec<SimulatorTask>) -> bool {
+pub fn feasible_schedule_design_time(tasks: &Vec<SimulatorTask>) -> bool {
+    // At design time, we assess the full recurrence for testing the AMC feasibility.
     feasible_in_mode(tasks, SimulatorMode::LMode)
         && feasible_in_mode(tasks, SimulatorMode::HMode)
-        && feasible_mode_changes(tasks)
+        && feasible_mode_changes::<false>(tasks)
 }
 
-fn wcet_in_mode(task: &Task, mode: SimulatorMode) -> u32 {
-    match mode {
-        SimulatorMode::LMode => task.props().wcet_l,
-        SimulatorMode::HMode => task.props().wcet_h,
-    }
+pub fn feasible_schedule_online(tasks: &Vec<SimulatorTask>) -> bool {
+    // At runtime, we have no "time" to calculate the full recurrence.
+    // Therefore, we assume Ri=Ti which is the worst case scenario.
+    feasible_in_mode(tasks, SimulatorMode::LMode) && feasible_mode_changes::<true>(tasks)
 }
 
 fn response_time(
@@ -18,7 +18,7 @@ fn response_time(
     tasks: &Vec<SimulatorTask>,
     mode: SimulatorMode,
 ) -> Option<u32> {
-    let wcet = wcet_in_mode(task.task, mode);
+    let wcet = task.task.props().wcet_in_mode(mode);
     let mut response_time = wcet as f32;
 
     for _ in 0..100 {
@@ -26,7 +26,7 @@ fn response_time(
         let interference = higher_priority_tasks
             .map(|t| {
                 (response_time as f32 / t.task.props().period as f32).ceil()
-                    * wcet_in_mode(t.task, mode) as f32
+                    * t.task.props().wcet_in_mode(mode) as f32
             })
             .sum::<f32>();
 
@@ -67,12 +67,13 @@ fn feasible_in_mode(tasks: &Vec<SimulatorTask>, mode: SimulatorMode) -> bool {
 /// As per "Response-Time Analysis for Mixed Criticality Systems" (2011).
 /// This calculates the response time during mode changes in AMC,
 /// and ensures Ri > Ti for each HTask.
-fn response_time_in_mode_changes(task: &SimulatorTask, tasks: &Vec<SimulatorTask>) -> Option<u32> {
+fn response_time_in_mode_changes<const APPROXIMATE: bool>(
+    task: &SimulatorTask,
+    tasks: &Vec<SimulatorTask>,
+) -> Option<u32> {
     if !matches!(task.task, Task::HTask(_)) {
         return None;
     }
-
-    let mut total_response_time = wcet_in_mode(task.task, SimulatorMode::HMode);
 
     let interference_by_ltasks = tasks
         .iter()
@@ -81,9 +82,28 @@ fn response_time_in_mode_changes(task: &SimulatorTask, tasks: &Vec<SimulatorTask
             ((response_time(task, tasks, SimulatorMode::LMode).unwrap() as f32)
                 / t.task.props().period as f32)
                 .ceil() as u32
-                * wcet_in_mode(t.task, SimulatorMode::LMode)
+                * t.task.props().wcet_in_mode(SimulatorMode::LMode)
         })
         .sum::<u32>();
+
+    if APPROXIMATE {
+        let interference_by_htasks = tasks
+            .iter()
+            .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority < task.priority)
+            .map(|t| {
+                (task.task.props().period as f32 / t.task.props().period as f32).ceil() as u32
+                    * t.task.props().wcet_in_mode(SimulatorMode::HMode)
+            })
+            .sum::<u32>();
+
+        return Some(
+            task.task.props().wcet_in_mode(SimulatorMode::HMode)
+                + interference_by_ltasks
+                + interference_by_htasks,
+        );
+    }
+
+    let mut total_response_time = task.task.props().wcet_in_mode(SimulatorMode::HMode);
 
     for _ in 0..100 {
         let interference_by_htasks = tasks
@@ -91,11 +111,11 @@ fn response_time_in_mode_changes(task: &SimulatorTask, tasks: &Vec<SimulatorTask
             .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority < task.priority)
             .map(|t| {
                 (total_response_time as f32 / t.task.props().period as f32).ceil() as u32
-                    * wcet_in_mode(t.task, SimulatorMode::HMode)
+                    * t.task.props().wcet_in_mode(SimulatorMode::HMode)
             })
             .sum::<u32>();
 
-        let new_total_response_time = wcet_in_mode(task.task, SimulatorMode::HMode)
+        let new_total_response_time = task.task.props().wcet_in_mode(SimulatorMode::HMode)
             + interference_by_htasks
             + interference_by_ltasks;
 
@@ -109,7 +129,7 @@ fn response_time_in_mode_changes(task: &SimulatorTask, tasks: &Vec<SimulatorTask
     None
 }
 
-fn feasible_mode_changes(tasks: &Vec<SimulatorTask>) -> bool {
+fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &Vec<SimulatorTask>) -> bool {
     let eligible_tasks = tasks
         .iter()
         .cloned()
@@ -117,7 +137,9 @@ fn feasible_mode_changes(tasks: &Vec<SimulatorTask>) -> bool {
         .collect::<Vec<_>>();
 
     for task in &eligible_tasks {
-        if let Some(response_time) = response_time_in_mode_changes(&task, &eligible_tasks) {
+        if let Some(response_time) =
+            response_time_in_mode_changes::<APPROXIMATE>(&task, &eligible_tasks)
+        {
             if response_time > task.task.props().period {
                 return false;
             }
@@ -132,10 +154,10 @@ fn feasible_mode_changes(tasks: &Vec<SimulatorTask>) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::simulator::{
-        schedulability::{
+        task::TaskProps,
+        validation::{
             feasible_in_mode, feasible_mode_changes, response_time, response_time_in_mode_changes,
         },
-        task::TaskProps,
         SimulatorTask,
     };
 
@@ -392,9 +414,12 @@ mod tests {
 
         let tasks = vec![task1, task2, task3];
 
-        assert_eq!(response_time_in_mode_changes(&task1, &tasks,), Some(8));
+        assert_eq!(
+            response_time_in_mode_changes::<false>(&task1, &tasks,),
+            Some(8)
+        );
 
-        assert!(feasible_mode_changes(&tasks));
+        assert!(feasible_mode_changes::<false>(&tasks));
     }
 
     #[test]
@@ -435,9 +460,15 @@ mod tests {
 
         let tasks = vec![task1, task2, task3];
 
-        assert_eq!(response_time_in_mode_changes(&task1, &tasks,), Some(8));
-        assert_eq!(response_time_in_mode_changes(&task2, &tasks,), Some(2));
+        assert_eq!(
+            response_time_in_mode_changes::<false>(&task1, &tasks,),
+            Some(8)
+        );
+        assert_eq!(
+            response_time_in_mode_changes::<false>(&task2, &tasks,),
+            Some(2)
+        );
 
-        assert!(feasible_mode_changes(&tasks));
+        assert!(feasible_mode_changes::<false>(&tasks));
     }
 }
