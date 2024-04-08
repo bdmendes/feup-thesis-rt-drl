@@ -1,5 +1,5 @@
 pub mod agent;
-pub mod drl;
+pub mod ml;
 pub mod simulator;
 
 fn main() {

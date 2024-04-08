@@ -12,9 +12,9 @@ pub enum Task {
 impl Task {
     pub fn props(&self) -> TaskProps {
         match self {
-            Task::LTask(props) => props.clone(),
-            Task::HTask(props) => props.clone(),
-            Task::DRLAgent(props) => props.clone(),
+            Task::LTask(props) => *props,
+            Task::HTask(props) => *props,
+            Task::DRLAgent(props) => *props,
         }
     }
 

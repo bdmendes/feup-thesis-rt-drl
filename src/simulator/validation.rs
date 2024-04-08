@@ -15,17 +15,17 @@ pub fn feasible_schedule_online(tasks: &Vec<SimulatorTask>) -> bool {
 
 fn response_time(
     task: &SimulatorTask,
-    tasks: &Vec<SimulatorTask>,
+    tasks: &[SimulatorTask],
     mode: SimulatorMode,
 ) -> Option<u32> {
     let wcet = task.task.props().wcet_in_mode(mode);
     let mut response_time = wcet as f32;
 
     for _ in 0..100 {
-        let higher_priority_tasks = tasks.into_iter().filter(|t| t.priority < task.priority);
+        let higher_priority_tasks = tasks.iter().filter(|t| t.priority < task.priority);
         let interference = higher_priority_tasks
             .map(|t| {
-                (response_time as f32 / t.task.props().period as f32).ceil()
+                (response_time / t.task.props().period as f32).ceil()
                     * t.task.props().wcet_in_mode(mode) as f32
             })
             .sum::<f32>();
@@ -38,12 +38,12 @@ fn response_time(
         }
     }
 
-    return None;
+    None
 }
 
 fn feasible_in_mode(tasks: &Vec<SimulatorTask>, mode: SimulatorMode) -> bool {
     let eligible_tasks = match mode {
-        SimulatorMode::LMode => tasks.clone(),
+        SimulatorMode::LMode => tasks.to_owned(),
         SimulatorMode::HMode => tasks
             .clone()
             .into_iter()
@@ -52,7 +52,7 @@ fn feasible_in_mode(tasks: &Vec<SimulatorTask>, mode: SimulatorMode) -> bool {
     };
 
     for task in &eligible_tasks {
-        if let Some(response_time) = response_time(&task, &eligible_tasks, mode) {
+        if let Some(response_time) = response_time(task, &eligible_tasks, mode) {
             if response_time > task.task.props().period {
                 return false;
             }
@@ -69,7 +69,7 @@ fn feasible_in_mode(tasks: &Vec<SimulatorTask>, mode: SimulatorMode) -> bool {
 /// and ensures Ri > Ti for each HTask.
 fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     task: &SimulatorTask,
-    tasks: &Vec<SimulatorTask>,
+    tasks: &[SimulatorTask],
 ) -> Option<u32> {
     if !matches!(task.task, Task::HTask(_)) {
         return None;
@@ -129,7 +129,7 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     None
 }
 
-fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &Vec<SimulatorTask>) -> bool {
+fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &[SimulatorTask]) -> bool {
     let eligible_tasks = tasks
         .iter()
         .cloned()
@@ -138,7 +138,7 @@ fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &Vec<SimulatorTask>) ->
 
     for task in &eligible_tasks {
         if let Some(response_time) =
-            response_time_in_mode_changes::<APPROXIMATE>(&task, &eligible_tasks)
+            response_time_in_mode_changes::<APPROXIMATE>(task, &eligible_tasks)
         {
             if response_time > task.task.props().period {
                 return false;
