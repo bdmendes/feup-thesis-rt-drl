@@ -4,11 +4,11 @@ use tch::Tensor;
 
 use super::{tensor::TensorStorage, ComputeModel};
 
-pub struct Linear {
+pub struct LinearLayer {
     params: HashMap<String, usize>,
 }
 
-impl Linear {
+impl LinearLayer {
     pub fn new(mem: &mut TensorStorage, ninputs: i64, noutputs: i64) -> Self {
         let mut p = HashMap::new();
         p.insert("W".to_string(), mem.push(&[ninputs, noutputs], true));
@@ -17,7 +17,7 @@ impl Linear {
     }
 }
 
-impl ComputeModel for Linear {
+impl ComputeModel for LinearLayer {
     fn forward(&self, mem: &TensorStorage, input: &Tensor) -> Tensor {
         let w = mem.get(*self.params.get(&"W".to_string()).unwrap());
         let b = mem.get(*self.params.get(&"b".to_string()).unwrap());

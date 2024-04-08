@@ -1,12 +1,16 @@
-use super::SimulatorMode;
+use std::cell::RefCell;
+
+use crate::agent::SimulatorAgent;
+
+use super::{Simulator, SimulatorMode};
 
 pub type TaskId = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Task {
     LTask(TaskProps),
     HTask(TaskProps),
-    DRLAgent(TaskProps),
+    DRLAgent(TaskProps, RefCell<SimulatorAgent>),
 }
 
 impl Task {
@@ -14,7 +18,7 @@ impl Task {
         match self {
             Task::LTask(props) => *props,
             Task::HTask(props) => *props,
-            Task::DRLAgent(props) => *props,
+            Task::DRLAgent(props, _) => *props,
         }
     }
 
@@ -23,7 +27,13 @@ impl Task {
         expected_execution_time
     }
 
-    pub fn activate(&self) {}
+    pub fn activate(&mut self, simulator: &mut Simulator) {
+        match self {
+            Task::LTask(_) => (),
+            Task::HTask(_) => (),
+            Task::DRLAgent(_, ref mut agent) => agent.borrow_mut().activate(simulator),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

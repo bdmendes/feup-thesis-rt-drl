@@ -45,9 +45,9 @@ fn feasible_in_mode(tasks: &Vec<SimulatorTask>, mode: SimulatorMode) -> bool {
     let eligible_tasks = match mode {
         SimulatorMode::LMode => tasks.to_owned(),
         SimulatorMode::HMode => tasks
-            .clone()
-            .into_iter()
+            .iter()
             .filter(|t| matches!(t.task, Task::HTask(_)))
+            .map(|t| t.to_owned())
             .collect::<Vec<_>>(),
     };
 
@@ -132,8 +132,8 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
 fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &[SimulatorTask]) -> bool {
     let eligible_tasks = tasks
         .iter()
-        .cloned()
         .filter(|t| matches!(t.task, Task::HTask(_)))
+        .map(|t| t.to_owned())
         .collect::<Vec<_>>();
 
     for task in &eligible_tasks {
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn feasible_in_mode_1() {
         let task1 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 4,
                 wcet_h: 4,
@@ -175,7 +175,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task2 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -186,7 +186,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task3 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -197,7 +197,7 @@ mod tests {
             expected_execution_time: 0,
         };
 
-        let tasks = vec![task1, task2, task3];
+        let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
         assert_eq!(
             response_time(&task1, &tasks, crate::simulator::SimulatorMode::LMode),
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn non_feasible_in_mode_1() {
         let task1 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 4,
                 wcet_h: 4,
@@ -232,7 +232,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task2 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -243,7 +243,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task3 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 3,
                 wcet_h: 3,
@@ -254,7 +254,7 @@ mod tests {
             expected_execution_time: 0,
         };
 
-        let tasks = vec![task1, task2, task3];
+        let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
         assert_eq!(
             response_time(&task1, &tasks, crate::simulator::SimulatorMode::LMode),
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn non_feasible_in_mode_2() {
         let task1 = SimulatorTask {
-            task: &crate::simulator::task::Task::HTask(TaskProps {
+            task: crate::simulator::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
                 wcet_h: 1,
@@ -289,7 +289,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task2 = SimulatorTask {
-            task: &crate::simulator::task::Task::HTask(TaskProps {
+            task: crate::simulator::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 1,
                 wcet_h: 1,
@@ -300,7 +300,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task3 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 4,
                 wcet_h: 4,
@@ -311,7 +311,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task4 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 4,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -322,7 +322,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task5 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 5,
                 wcet_l: 3,
                 wcet_h: 3,
@@ -333,7 +333,13 @@ mod tests {
             expected_execution_time: 0,
         };
 
-        let tasks = vec![task1, task2, task3, task4, task5];
+        let tasks = vec![
+            task1.clone(),
+            task2.clone(),
+            task3.clone(),
+            task4.clone(),
+            task5.clone(),
+        ];
 
         assert_eq!(
             response_time(&task1, &tasks, crate::simulator::SimulatorMode::HMode),
@@ -379,7 +385,7 @@ mod tests {
     #[test]
     fn feasible_mode_change_1() {
         let task1 = SimulatorTask {
-            task: &crate::simulator::task::Task::HTask(TaskProps {
+            task: crate::simulator::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 3,
                 wcet_h: 4,
@@ -390,7 +396,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task2 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -401,7 +407,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task3 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -412,7 +418,7 @@ mod tests {
             expected_execution_time: 0,
         };
 
-        let tasks = vec![task1, task2, task3];
+        let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
         assert_eq!(
             response_time_in_mode_changes::<false>(&task1, &tasks,),
@@ -425,7 +431,7 @@ mod tests {
     #[test]
     fn feasible_mode_change_2() {
         let task1 = SimulatorTask {
-            task: &crate::simulator::task::Task::HTask(TaskProps {
+            task: crate::simulator::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 3,
                 wcet_h: 4,
@@ -436,7 +442,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task2 = SimulatorTask {
-            task: &crate::simulator::task::Task::HTask(TaskProps {
+            task: crate::simulator::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -447,7 +453,7 @@ mod tests {
             expected_execution_time: 0,
         };
         let task3 = SimulatorTask {
-            task: &crate::simulator::task::Task::LTask(TaskProps {
+            task: crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -458,7 +464,7 @@ mod tests {
             expected_execution_time: 0,
         };
 
-        let tasks = vec![task1, task2, task3];
+        let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
         assert_eq!(
             response_time_in_mode_changes::<false>(&task1, &tasks,),

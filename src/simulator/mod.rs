@@ -3,15 +3,15 @@ use self::task::{Task, TaskId};
 pub mod task;
 pub mod validation;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SimulatorTask<'a> {
-    task: &'a Task,
-    priority: u32,
-    expected_execution_time: u32,
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimulatorTask {
+    pub task: Task,
+    pub priority: u32,
+    pub expected_execution_time: u32,
 }
 
-impl<'a> SimulatorTask<'a> {
-    pub fn new(task: &'a Task, priority: u32, expected_execution_time: u32) -> Self {
+impl SimulatorTask {
+    pub fn new(task: Task, priority: u32, expected_execution_time: u32) -> Self {
         Self {
             task,
             priority,
@@ -20,9 +20,9 @@ impl<'a> SimulatorTask<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct SimulatorJob<'a> {
-    task: SimulatorTask<'a>,
+#[derive(Debug, Clone)]
+struct SimulatorJob {
+    task: SimulatorTask,
     running_for: u32,
     remaining: u32,
 }
@@ -33,20 +33,37 @@ pub enum SimulatorMode {
     HMode,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum SimulatorEvent<'a> {
-    Start(SimulatorTask<'a>, u32),
-    TaskKill(SimulatorTask<'a>, u32),
+#[derive(Debug, Clone, PartialEq)]
+pub enum SimulatorEvent {
+    Start(TaskId, u32),
+    TaskKill(TaskId, u32),
     ModeChange(SimulatorMode, u32),
+    EndSimulation,
 }
 
-pub struct Simulator<'a> {
-    pub tasks: Vec<SimulatorTask<'a>>,
+impl SimulatorEvent {
+    pub fn task(&self, simulator: &Simulator) -> Option<SimulatorTask> {
+        match self {
+            SimulatorEvent::Start(task_id, _) | SimulatorEvent::TaskKill(task_id, _) => Some(
+                simulator
+                    .tasks
+                    .iter()
+                    .find(|t| t.task.props().id == *task_id)
+                    .unwrap()
+                    .clone(),
+            ),
+            _ => None,
+        }
+    }
+}
+
+pub struct Simulator {
+    pub tasks: Vec<SimulatorTask>,
     pub random_execution_time: bool,
 }
 
-impl<'a> Simulator<'a> {
-    pub fn run(&mut self, duration: u32) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent<'a>>) {
+impl Simulator {
+    pub fn run(&mut self, duration: u32) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent>) {
         let mut run_history = vec![];
         let mut simulator_events_history = vec![];
         let mut current_mode = SimulatorMode::LMode;
@@ -61,7 +78,9 @@ impl<'a> Simulator<'a> {
                 (props.offset..duration)
                     .step_by(props.period as usize)
                     .next()
-                    .map(move |activation_time| SimulatorEvent::Start(*task, activation_time))
+                    .map(move |activation_time| {
+                        SimulatorEvent::Start(task.task.props().id, activation_time)
+                    })
             })
             .collect::<Vec<_>>();
 
@@ -71,29 +90,32 @@ impl<'a> Simulator<'a> {
             let new_jobs = task_start_events
                 .iter()
                 .filter(|event| match event {
-                    SimulatorEvent::Start(task, instant) => {
+                    SimulatorEvent::Start(_, instant) => {
                         time == *instant
                             && (matches!(current_mode, SimulatorMode::LMode)
-                                || matches!(task.task, Task::HTask(_)))
+                                || matches!(event.task(self).unwrap().task, Task::HTask(_)))
                     }
                     _ => unreachable!(),
                 })
                 .map(|event| match event {
-                    SimulatorEvent::Start(task, _) => SimulatorJob {
-                        task: *task,
-                        running_for: 0,
-                        remaining: if self.random_execution_time {
-                            Task::sample_execution_time(task.expected_execution_time)
-                        } else {
-                            task.expected_execution_time
-                        },
-                    },
+                    SimulatorEvent::Start(_, _) => {
+                        let task = event.task(self).unwrap();
+                        SimulatorJob {
+                            task: task.clone(),
+                            running_for: 0,
+                            remaining: if self.random_execution_time {
+                                Task::sample_execution_time(task.expected_execution_time)
+                            } else {
+                                task.expected_execution_time
+                            },
+                        }
+                    }
                     _ => unreachable!(),
                 })
                 .collect::<Vec<_>>();
 
             // Add new jobs to current jobs
-            current_running_jobs.extend(&new_jobs);
+            current_running_jobs.extend(new_jobs);
             current_running_jobs.sort_by(|a, b| a.task.priority.cmp(&b.task.priority));
 
             // Check for multiple jobs for the same tasks.
@@ -113,15 +135,15 @@ impl<'a> Simulator<'a> {
             if let Some(job) = current_running_jobs.first_mut() {
                 if job.running_for == 0 {
                     // Activate the task.
-                    job.task.task.activate();
+                    // If this is an agent, this will trigger event processing
+                    // and tasks props changes.
+                    job.task.task.activate(self);
 
                     // Schedule the next start event.
                     let this_task_start_event = task_start_events
                         .iter_mut()
                         .find(|e| match e {
-                            SimulatorEvent::Start(t, _) => {
-                                t.task.props().id == job.task.task.props().id
-                            }
+                            SimulatorEvent::Start(id, _) => *id == job.task.task.props().id,
                             _ => unreachable!(),
                         })
                         .unwrap();
@@ -130,7 +152,8 @@ impl<'a> Simulator<'a> {
                         _ => unreachable!(),
                     };
                     let new_instant = *previous_instant + job.task.task.props().period;
-                    *this_task_start_event = SimulatorEvent::Start(job.task, new_instant);
+                    *this_task_start_event =
+                        SimulatorEvent::Start(job.task.task.props().id, new_instant);
                 }
 
                 job.running_for += 1;
@@ -164,7 +187,8 @@ impl<'a> Simulator<'a> {
                         // more LTasks, we only kill the current job.
                         current_running_jobs
                             .retain(|j| j.task.task.props().id != job.task.task.props().id);
-                        simulator_events_history.push(SimulatorEvent::TaskKill(job.task, time));
+                        simulator_events_history
+                            .push(SimulatorEvent::TaskKill(job.task.task.props().id, time));
                     }
                 }
             } else {
@@ -192,7 +216,7 @@ mod tests {
 
     fn same_criticality() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
                 wcet_h: 1,
@@ -203,7 +227,7 @@ mod tests {
             1,
         );
         let task2 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -243,7 +267,7 @@ mod tests {
 
     fn same_criticality_2() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -254,7 +278,7 @@ mod tests {
             2,
         );
         let task2 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -265,7 +289,7 @@ mod tests {
             2,
         );
         let task3 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 1,
                 wcet_h: 1,
@@ -304,7 +328,7 @@ mod tests {
     #[test]
     fn different_criticality() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::HTask(TaskProps {
+            super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
                 wcet_h: 1,
@@ -315,7 +339,7 @@ mod tests {
             1,
         );
         let task2 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
@@ -352,7 +376,7 @@ mod tests {
     #[test]
     fn different_criticality_task_kill() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
                 wcet_h: 0,
@@ -363,7 +387,7 @@ mod tests {
             3,
         );
         let task2 = SimulatorTask::new(
-            &super::task::Task::HTask(TaskProps {
+            super::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 3,
@@ -375,7 +399,7 @@ mod tests {
         );
 
         let mut simulator = Simulator {
-            tasks: vec![task1, task2],
+            tasks: vec![task1.clone(), task2.clone()],
             random_execution_time: false,
         };
         let (tasks, events) = simulator.run(12);
@@ -401,9 +425,9 @@ mod tests {
         assert_eq!(
             events,
             vec![
-                SimulatorEvent::TaskKill(task1, 1),
-                SimulatorEvent::TaskKill(task1, 6),
-                SimulatorEvent::TaskKill(task1, 11),
+                SimulatorEvent::TaskKill(task1.task.props().id, 1),
+                SimulatorEvent::TaskKill(task1.task.props().id, 6),
+                SimulatorEvent::TaskKill(task1.task.props().id, 11),
             ]
         );
     }
@@ -411,7 +435,7 @@ mod tests {
     #[test]
     fn different_criticality_mode_change() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::HTask(TaskProps {
+            super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
                 wcet_h: 3,
@@ -422,7 +446,7 @@ mod tests {
             3,
         );
         let task2 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 3,
@@ -472,7 +496,7 @@ mod tests {
     #[test]
     fn non_feasible_simple() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
                 wcet_h: 1,
@@ -483,7 +507,7 @@ mod tests {
             1,
         );
         let task2 = SimulatorTask::new(
-            &super::task::Task::LTask(TaskProps {
+            super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 3,
                 wcet_h: 3,
@@ -507,7 +531,7 @@ mod tests {
     #[test]
     fn non_feasible_mode_change() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::HTask(TaskProps {
+            super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
                 wcet_h: 3,
@@ -518,7 +542,7 @@ mod tests {
             3,
         );
         let task2 = SimulatorTask::new(
-            &super::task::Task::HTask(TaskProps {
+            super::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 3,
                 wcet_h: 3,
@@ -548,7 +572,7 @@ mod tests {
     #[test]
     fn non_feasible_exceed_wcet_h() {
         let task1 = SimulatorTask::new(
-            &super::task::Task::HTask(TaskProps {
+            super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
                 wcet_h: 3,

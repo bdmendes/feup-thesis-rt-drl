@@ -2,9 +2,7 @@ use tch::{Device, Kind, Tensor};
 
 use self::tensor::TensorStorage;
 
-pub mod conv2d;
 pub mod linear;
-pub mod rnn;
 pub mod tensor;
 
 pub const DEVICE: Device = Device::Cpu;
