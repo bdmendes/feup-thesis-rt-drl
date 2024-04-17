@@ -1,16 +1,12 @@
-use std::cell::RefCell;
-
-use crate::agent::SimulatorAgent;
-
-use super::{Simulator, SimulatorMode};
+use super::SimulatorMode;
 
 pub type TaskId = u32;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub enum Task {
     LTask(TaskProps),
     HTask(TaskProps),
-    DRLAgent(TaskProps, RefCell<SimulatorAgent>),
+    DRLAgent(TaskProps),
 }
 
 impl Task {
@@ -18,21 +14,21 @@ impl Task {
         match self {
             Task::LTask(props) => *props,
             Task::HTask(props) => *props,
-            Task::DRLAgent(props, _) => *props,
+            Task::DRLAgent(props) => *props,
+        }
+    }
+
+    pub fn props_mut(&mut self) -> &mut TaskProps {
+        match self {
+            Task::LTask(props) => props,
+            Task::HTask(props) => props,
+            Task::DRLAgent(props) => props,
         }
     }
 
     pub fn sample_execution_time(expected_execution_time: u32) -> u32 {
         // TODO: Implement random execution time
         expected_execution_time
-    }
-
-    pub fn activate(&mut self, simulator: &mut Simulator) {
-        match self {
-            Task::LTask(_) => (),
-            Task::HTask(_) => (),
-            Task::DRLAgent(_, ref mut agent) => agent.borrow_mut().activate(simulator),
-        }
     }
 }
 

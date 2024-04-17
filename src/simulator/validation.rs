@@ -1,13 +1,13 @@
 use super::{task::Task, SimulatorMode, SimulatorTask};
 
-pub fn feasible_schedule_design_time(tasks: &Vec<SimulatorTask>) -> bool {
+pub fn feasible_schedule_design_time(tasks: &[SimulatorTask]) -> bool {
     // At design time, we assess the full recurrence for testing the AMC feasibility.
     feasible_in_mode(tasks, SimulatorMode::LMode)
         && feasible_in_mode(tasks, SimulatorMode::HMode)
         && feasible_mode_changes::<false>(tasks)
 }
 
-pub fn feasible_schedule_online(tasks: &Vec<SimulatorTask>) -> bool {
+pub fn feasible_schedule_online(tasks: &[SimulatorTask]) -> bool {
     // At runtime, we have no "time" to calculate the full recurrence.
     // Therefore, we assume Ri=Ti which is the worst case scenario.
     feasible_in_mode(tasks, SimulatorMode::LMode) && feasible_mode_changes::<true>(tasks)
@@ -41,9 +41,9 @@ fn response_time(
     None
 }
 
-fn feasible_in_mode(tasks: &Vec<SimulatorTask>, mode: SimulatorMode) -> bool {
+fn feasible_in_mode(tasks: &[SimulatorTask], mode: SimulatorMode) -> bool {
     let eligible_tasks = match mode {
-        SimulatorMode::LMode => tasks.to_owned(),
+        SimulatorMode::LMode => tasks.to_vec(),
         SimulatorMode::HMode => tasks
             .iter()
             .filter(|t| matches!(t.task, Task::HTask(_)))
@@ -138,7 +138,7 @@ fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &[SimulatorTask]) -> bo
 
     for task in &eligible_tasks {
         if let Some(response_time) =
-            response_time_in_mode_changes::<APPROXIMATE>(task, &eligible_tasks)
+            response_time_in_mode_changes::<APPROXIMATE>(task, eligible_tasks.as_slice())
         {
             if response_time > task.task.props().period {
                 return false;

@@ -5,6 +5,7 @@ use tch::Tensor;
 
 use crate::ml::{linear::LinearLayer, tensor::TensorStorage, ComputeModel};
 
+#[derive(Debug, Clone, Copy)]
 pub enum ActivationFunction {
     Tanh,
     ReLU,
@@ -65,13 +66,15 @@ impl Transition {
 pub struct ReplayMemory {
     transitions: VecDeque<Transition>,
     capacity: usize,
+    min_size: usize,
 }
 
 impl ReplayMemory {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, min_size: usize) -> Self {
         Self {
             transitions: VecDeque::new(),
             capacity,
+            min_size,
         }
     }
 
@@ -103,5 +106,9 @@ impl ReplayMemory {
             Tensor::from_slice(rewards.as_slice()).unsqueeze(1),
             Tensor::stack(&states_, 0),
         )
+    }
+
+    pub fn init(&mut self) {
+        // TODO: Do we need to init min size here?
     }
 }
