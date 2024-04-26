@@ -85,6 +85,13 @@ impl ReplayMemory {
         }
     }
 
+    pub fn add_initial(&mut self, transition: Transition) -> bool {
+        if self.transitions.len() < self.min_size {
+            self.add(transition);
+        }
+        self.transitions.len() >= self.min_size
+    }
+
     pub fn sample_batch(&self, size: usize) -> (Tensor, Tensor, Tensor, Tensor) {
         let index: Vec<usize> = (0..size)
             .map(|_| rand::thread_rng().gen_range(0..self.transitions.len()))
@@ -106,9 +113,5 @@ impl ReplayMemory {
             Tensor::from_slice(rewards.as_slice()).unsqueeze(1),
             Tensor::stack(&states_, 0),
         )
-    }
-
-    pub fn init(&mut self) {
-        // TODO: Do we need to init min size here?
     }
 }

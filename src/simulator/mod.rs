@@ -7,7 +7,7 @@ use self::task::{Task, TaskId};
 pub mod task;
 pub mod validation;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SimulatorTask {
     pub task: Task,
     pub priority: u32,
@@ -141,6 +141,7 @@ impl Simulator {
                     .count()
                     > 1
                 {
+                    println!("Multiple jobs of the same task; the system is not schedulable.");
                     return (None, simulator_events_history);
                 }
             }
@@ -148,15 +149,6 @@ impl Simulator {
             // Update the most prioritary job for this instant.
             if let Some(job) = current_running_jobs.first_mut() {
                 if job.running_for == 0 {
-                    // If this is an agent, this will trigger event processing
-                    // and tasks props changes.
-                    let is_drl_agent = matches!(job.task(self).task, Task::DRLAgent(_));
-                    if is_drl_agent {
-                        let agent = self.agent.take().unwrap();
-                        agent.borrow_mut().activate(self, &run_history);
-                        self.agent = Some(agent);
-                    }
-
                     // Schedule the next start event.
                     let this_task_start_event = task_start_events
                         .iter_mut()
@@ -174,6 +166,12 @@ impl Simulator {
                         SimulatorEvent::Start(job.task(self).task.props().id, new_instant);
                 }
 
+                println!(
+                    "Running task {} for instant {}",
+                    job.task(self).task.props().id,
+                    time
+                );
+
                 job.running_for += 1;
                 job.remaining -= 1;
                 run_history.push(Some(job.task(self).task.props().id));
@@ -189,6 +187,10 @@ impl Simulator {
                 {
                     // Task has surpassed its worst case execution time in H-mode.
                     // The system is not schedulable.
+                    println!(
+                        "Task {} has surpassed its worst case execution time in H-mode.",
+                        job.task(self).task.props().id
+                    );
                     return (None, simulator_events_history);
                 } else if matches!(current_mode, SimulatorMode::LMode)
                     && job.running_for >= job.task(self).task.props().wcet_l
@@ -196,6 +198,7 @@ impl Simulator {
                     // Task has surpassed its worst case execution time in L-mode
                     if matches!(job.task(self).task, Task::HTask(_)) {
                         // This is a HTask. We must switch mode immediately.
+                        println!("Task {} has surpassed its worst case execution time in L-mode. Switching to H-mode.", job.task(self).task.props().id);
                         current_mode = SimulatorMode::HMode;
                         current_running_jobs
                             .retain(|job| matches!(job.task(self).task, Task::HTask(_)));
@@ -204,6 +207,7 @@ impl Simulator {
                     } else {
                         // We could go about this in some ways, but in an attempt to try to preserve
                         // more LTasks, we only kill the current job.
+                        println!("Task {} has surpassed its worst case execution time in L-mode. Killing task.", job.task(self).task.props().id);
                         current_running_jobs.retain(|j| {
                             j.task(self).task.props().id != job.task(self).task.props().id
                         });
@@ -214,14 +218,28 @@ impl Simulator {
                     }
                 }
             } else {
+                // No task is running. We can run the agent.
+                // This will trigger event processing
+                // and tasks props changes.
+                println!("No task is running. Running agent.");
+
+                let agent = self.agent.take().unwrap();
+                agent.borrow_mut().activate(self, &run_history);
+                self.agent = Some(agent);
+
                 if current_mode != SimulatorMode::LMode {
-                    // No task is running. Switch to LMode.
                     current_mode = SimulatorMode::LMode;
                     simulator_events_history
                         .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
                 }
+
                 run_history.push(None);
             }
+        }
+
+        // Signal to simulator end of episode.
+        if let Some(agent) = self.agent.as_ref() {
+            agent.borrow_mut().signal_episode_done();
         }
 
         (Some(run_history), simulator_events_history)

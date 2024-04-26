@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+compute = "0.2.3"
 gnuplot = "0.0.43"
 rand = "0.8.5"
 tch = {version = "0.15.0", features = ["download-libtorch"]}

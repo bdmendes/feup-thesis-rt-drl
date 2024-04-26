@@ -64,6 +64,39 @@ impl TensorStorage {
             }
         });
     }
+
+    pub fn apply_grads_adam(&mut self, learning_rate: f32) {
+        let mut g = Tensor::new();
+        const BETA: f32 = 0.9;
+
+        let mut velocity = zeros(&[self.size() as i64]).split(1, 0);
+        let mut mom = zeros(&[self.size() as i64]).split(1, 0);
+        let mut vel_corr = zeros(&[self.size() as i64]).split(1, 0);
+        let mut mom_corr = zeros(&[self.size() as i64]).split(1, 0);
+        let mut counter = 0;
+
+        self.values.iter_mut().for_each(|t| {
+            if t.requires_grad() {
+                g = t.grad();
+                g = g.clamp(-1, 1);
+                mom[counter] = BETA * &mom[counter] + (1.0 - BETA) * &g;
+                velocity[counter] =
+                    BETA * &velocity[counter] + (1.0 - BETA) * (&g.pow(&Tensor::from(2)));
+                mom_corr[counter] =
+                    &mom[counter] / (Tensor::from(1.0 - BETA).pow(&Tensor::from(2)));
+                vel_corr[counter] =
+                    &velocity[counter] / (Tensor::from(1.0 - BETA).pow(&Tensor::from(2)));
+
+                t.set_data(
+                    &(t.data()
+                        - learning_rate
+                            * (&mom_corr[counter] / (&velocity[counter].sqrt() + 0.0000001))),
+                );
+                t.zero_grad();
+            }
+            counter += 1;
+        });
+    }
 }
 
 pub fn mean_squared_error(target: &Tensor, pred: &Tensor) -> Tensor {

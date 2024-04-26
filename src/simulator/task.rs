@@ -2,11 +2,10 @@ use super::SimulatorMode;
 
 pub type TaskId = u32;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Task {
     LTask(TaskProps),
     HTask(TaskProps),
-    DRLAgent(TaskProps),
 }
 
 impl Task {
@@ -14,7 +13,6 @@ impl Task {
         match self {
             Task::LTask(props) => *props,
             Task::HTask(props) => *props,
-            Task::DRLAgent(props) => *props,
         }
     }
 
@@ -22,7 +20,6 @@ impl Task {
         match self {
             Task::LTask(props) => props,
             Task::HTask(props) => props,
-            Task::DRLAgent(props) => props,
         }
     }
 
