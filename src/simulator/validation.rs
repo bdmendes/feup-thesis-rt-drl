@@ -52,6 +52,10 @@ fn feasible_in_mode(tasks: &[SimulatorTask], mode: SimulatorMode) -> bool {
     };
 
     for task in &eligible_tasks {
+        if task.task.props().wcet_in_mode(mode) == 0 {
+            return false;
+        }
+
         if let Some(response_time) = response_time(task, &eligible_tasks, mode) {
             if response_time > task.task.props().period {
                 return false;
