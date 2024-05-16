@@ -45,6 +45,7 @@ impl ComputeModel for Policy {
     }
 }
 
+#[derive(Debug)]
 pub struct Transition {
     state: Tensor,
     action: i64,

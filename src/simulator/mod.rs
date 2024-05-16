@@ -164,6 +164,15 @@ impl Simulator {
                     let new_instant = *previous_instant + job.task(self).task.props().period;
                     *this_task_start_event =
                         SimulatorEvent::Start(job.task(self).task.props().id, new_instant);
+
+                    // Signal task start to simulator.
+                    simulator_events_history
+                        .push(SimulatorEvent::Start(job.task(self).task.props().id, time));
+                    self.agent
+                        .as_ref()
+                        .unwrap()
+                        .borrow_mut()
+                        .push_event(SimulatorEvent::Start(job.task(self).task.props().id, time));
                 }
 
                 println!(
@@ -204,6 +213,11 @@ impl Simulator {
                             .retain(|job| matches!(job.task(self).task, Task::HTask(_)));
                         simulator_events_history
                             .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
+                        self.agent
+                            .as_ref()
+                            .unwrap()
+                            .borrow_mut()
+                            .push_event(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
                     } else {
                         // We could go about this in some ways, but in an attempt to try to preserve
                         // more LTasks, we only kill the current job.
@@ -215,6 +229,9 @@ impl Simulator {
                             job.task(self).task.props().id,
                             time,
                         ));
+                        self.agent.as_ref().unwrap().borrow_mut().push_event(
+                            SimulatorEvent::TaskKill(job.task(self).task.props().id, time),
+                        );
                     }
                 }
             } else {
@@ -231,15 +248,15 @@ impl Simulator {
                     current_mode = SimulatorMode::LMode;
                     simulator_events_history
                         .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
+                    self.agent
+                        .as_ref()
+                        .unwrap()
+                        .borrow_mut()
+                        .push_event(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
                 }
 
                 run_history.push(None);
             }
-        }
-
-        // Signal to simulator end of episode.
-        if let Some(agent) = self.agent.as_ref() {
-            agent.borrow_mut().signal_episode_done();
         }
 
         (Some(run_history), simulator_events_history)

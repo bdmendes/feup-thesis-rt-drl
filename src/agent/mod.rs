@@ -3,22 +3,19 @@ use crate::agent::dqn::Transition;
 use crate::ml::tensor::{mean_squared_error, TensorStorage};
 use crate::ml::ComputeModel;
 use crate::simulator::validation::feasible_schedule_online;
-use crate::simulator::SimulatorTask;
-use crate::simulator::{
-    task::{Task, TaskId},
-    Simulator, SimulatorEvent,
-};
+use crate::simulator::{task::TaskId, Simulator, SimulatorEvent};
+use crate::simulator::{SimulatorMode, SimulatorTask};
 use rand::Rng;
 use tch::Tensor;
 
 pub mod dqn;
 
 pub const DEFAULT_MEM_SIZE: usize = 200;
-pub const DEFAULT_MIN_MEM_SIZE: usize = 20;
+pub const DEFAULT_MIN_MEM_SIZE: usize = 10;
 pub const DEFAULT_GAMMA: f32 = 0.99;
 pub const DEFAULT_UPDATE_FREQ: usize = 10;
 pub const DEFAULT_LEARNING_RATE: f32 = 0.00005;
-pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 16;
+pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 8;
 
 #[derive(Debug)]
 pub enum SimulatorAction {
@@ -37,6 +34,10 @@ impl SimulatorAction {
     }
 
     pub fn apply(&self, tasks: &mut [SimulatorTask]) {
+        if matches!(self, SimulatorAction::None) {
+            return;
+        }
+
         let task_to_change = tasks
             .iter_mut()
             .find(|t| t.task.props().id == self.task_id())
@@ -50,7 +51,7 @@ impl SimulatorAction {
                 task_to_change.task.props_mut().wcet_l =
                     task_to_change.task.props().wcet_l.saturating_sub(1);
             }
-            SimulatorAction::None => (),
+            SimulatorAction::None => unreachable!(),
         }
     }
 
@@ -81,7 +82,6 @@ enum SimulatorAgentStage {
 pub struct SimulatorAgent {
     // The agent is informed periodically about the state of the simulator.
     pending_events: Vec<SimulatorEvent>,
-    last_processed_history_index: usize,
 
     // DQN parameters.
     sample_batch_size: usize,
@@ -107,11 +107,11 @@ pub struct SimulatorAgent {
     memory_policy: TensorStorage,
     memory_target: TensorStorage,
     epsilon: f32,
-    episode_return: f32,
-    returns_history: Vec<f32>,
+    reward_history: Vec<f32>,
 
     buffered_action: Option<SimulatorAction>,
     buffered_state: Option<Tensor>,
+    buffered_reward: Option<f64>,
 }
 
 impl SimulatorAgent {
@@ -123,6 +123,7 @@ impl SimulatorAgent {
         update_freq: usize,
         learning_rate: f32,
         hidden_size: u64,
+        sample_batch_size: usize,
         activation: dqn::ActivationFunction,
         number_of_actions: usize,
         number_of_features: usize,
@@ -148,22 +149,21 @@ impl SimulatorAgent {
 
         Self {
             pending_events: Vec::new(),
-            last_processed_history_index: 0,
             gamma,
             update_freq,
             learning_rate,
+            sample_batch_size,
             stage: SimulatorAgentStage::DataCollection,
             policy_network,
             target_network,
             replay_memory,
             memory_policy,
             memory_target,
-            episode_return: 0.0,
             epsilon: 1.0,
-            returns_history: Vec::new(),
-            sample_batch_size: DEFAULT_SAMPLE_BATCH_SIZE,
+            reward_history: Vec::new(),
             buffered_action: None,
             buffered_state: None,
+            buffered_reward: None,
         }
     }
 
@@ -172,10 +172,10 @@ impl SimulatorAgent {
     }
 
     pub fn activate(&mut self, simulator: &mut Simulator, history: &[Option<TaskId>]) {
-        // We take the slice of new/unknown task runs to build a state tensor.
-        let history_slice = &history[self.last_processed_history_index..];
-        self.last_processed_history_index = history.len();
-        let state = Self::history_slice_to_input(history_slice, simulator);
+        println!("\nActivating agent.");
+
+        // Build a state tensor from the simulator's state.
+        let state = Self::history_to_input(history, simulator);
 
         // Get a new action from the policy.
         let action = Self::epsilon_greedy(
@@ -194,53 +194,62 @@ impl SimulatorAgent {
             println!("Invalid action {:?}, reverting.", action);
             let reverse_action = action.reverse();
             reverse_action.apply(&mut simulator.tasks);
+            self.buffered_reward = Some(-0.25);
         } else {
             println!("Applied action {:?}", action);
+            println!("Tasks: {:?}", simulator.tasks);
+            self.buffered_reward = Some(0.25);
         }
 
-        // In the data collection stage, we simply act and store the transitions
-        // until the replay memory is filled with its minimum size.
-        // Since our agent is asynchronous, we need to check if we have a "next"
-        // state ready to be stored.
-        if self.stage == SimulatorAgentStage::DataCollection {
-            println!("We are in the data collection stage.");
-            if let Some(buffered_action) = &self.buffered_action {
-                println!("Got buffered action: {:?}", buffered_action);
+        if let Some(buffered_action) = &self.buffered_action {
+            println!("Last buffered action: {:?}", buffered_action);
 
-                // We had taken an action previously, and are now receiving the reward.
-                let reward = self
-                    .pending_events
-                    .pop()
-                    .map_or(0.0, |e| Self::event_to_reward(&e, simulator));
-                println!("Got reward: {}", reward);
-                let transition = Transition::new(
-                    self.buffered_state.as_ref().unwrap(),
-                    Self::action_to_index(buffered_action, simulator) as i64,
-                    reward as f32,
-                    &state,
-                );
+            // We had taken an action previously, and are now receiving the reward.
+            let reward = self
+                .pending_events
+                .pop()
+                .map_or(0.0, |e| Self::event_to_reward(&e, simulator))
+                + self.buffered_reward.unwrap_or(0.0);
+            self.reward_history.push(reward as f32);
+            println!("Got reward: {}", reward);
 
-                if self.replay_memory.add_initial(transition) {
-                    // The replay memory is now filled with the minimum number of transitions.
-                    self.stage = SimulatorAgentStage::Training;
+            let transition = Transition::new(
+                self.buffered_state.as_ref().unwrap(),
+                Self::action_to_index(buffered_action, simulator) as i64,
+                reward as f32,
+                &state,
+            );
+
+            println!("Pushing transition to replay memory: {:?}", transition);
+
+            match self.stage {
+                SimulatorAgentStage::DataCollection => {
+                    if self.replay_memory.add_initial(transition) {
+                        // The replay memory is now filled with the minimum number of transitions.
+                        self.stage = SimulatorAgentStage::Training;
+                    }
                 }
+                SimulatorAgentStage::Training => {
+                    self.replay_memory.add(transition);
+                }
+                _ => {}
             }
-
-            self.buffered_action = Some(action);
-            self.buffered_state = Some(state);
-
-            return;
         }
 
-        // If we are no longer training, do nothing else.
-        if self.stage == SimulatorAgentStage::Reactive {
+        // Store this action and state to generate a transition later.
+        self.buffered_action = Some(action);
+        self.buffered_state = Some(state);
+
+        // If we are not training, do nothing else.
+        if self.stage != SimulatorAgentStage::Training {
             println!("Not training. Skipping NN activity.");
             return;
         }
 
         println!("Training.");
 
-        let (b_state, b_action, b_reward, b_state_) = self.replay_memory.sample_batch(128);
+        let (b_state, b_action, b_reward, b_state_) =
+            self.replay_memory.sample_batch(self.sample_batch_size);
         let qvalues = self
             .policy_network
             .forward(&self.memory_policy, &b_state)
@@ -257,8 +266,12 @@ impl SimulatorAgent {
 
         // We update the target network every `update_freq` steps.
         // This allows for a more stable learning process.
-        if self.returns_history.len() % self.update_freq == 0 {
+        if self.reward_history.len() % self.update_freq == 0 {
+            println!("Updating target network.");
             self.memory_target.copy(&self.memory_policy);
+
+            self.epsilon = (self.epsilon * 0.95).max(0.3);
+            println!("Updated epsilon: {}", self.epsilon);
         }
     }
 
@@ -266,80 +279,81 @@ impl SimulatorAgent {
         self.stage = SimulatorAgentStage::Reactive;
     }
 
-    pub fn signal_episode_done(&mut self) {
-        if self.stage != SimulatorAgentStage::Reactive {
-            self.returns_history.push(self.episode_return);
-            self.episode_return = 0.0;
-        }
-    }
-
     pub fn event_to_reward(event: &SimulatorEvent, _simulator: &Simulator) -> f64 {
         match event {
-            SimulatorEvent::Start(_, _) => 2.0,
+            SimulatorEvent::Start(_, _) => 0.25,
             SimulatorEvent::TaskKill(_, _) => -1.0,
-            SimulatorEvent::ModeChange(_, _) => -2.0,
-            SimulatorEvent::EndSimulation => 0.0,
+            SimulatorEvent::ModeChange(SimulatorMode::HMode, _) => -2.0,
+            _ => 0.0,
         }
     }
 
-    pub fn history_slice_to_input(
-        history_slice: &[Option<TaskId>],
-        simulator: &Simulator,
-    ) -> Tensor {
+    pub fn history_to_input(history: &[Option<TaskId>], simulator: &Simulator) -> Tensor {
         let mut input = Vec::with_capacity(Self::number_of_features(&simulator.tasks));
 
         for task in &simulator.tasks {
             let wcet_l = task.task.props().wcet_l as f32;
             let deadline = task.task.props().period as f32;
-            let time_since_last_run = history_slice
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(i, t)| {
-                    t.and_then(|t| {
-                        if t == task.task.props().id {
-                            Some(i as f32)
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .unwrap_or(-1.0);
-            let instants_executed = history_slice
-                .iter()
-                .filter_map(|t| {
-                    if let Some(t) = t {
-                        if *t == task.task.props().id {
-                            Some(1.0)
-                        } else {
-                            Some(0.0)
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .sum::<f32>();
+            let offset = task.task.props().offset as f32;
+            let priority = task.priority as f32;
+
+            // Assuming there are no overlapping jobs of the same task in a period,
+            // the last execution time is the number of instants of the task
+            // since the last one + period.
+            let last_executed_distance = history.iter().rev().position(|t| {
+                if let Some(t) = t {
+                    *t == task.task.props().id
+                } else {
+                    false
+                }
+            });
+            let last_job_execution_time = match last_executed_distance {
+                Some(instant) if (instant + task.task.props().period as usize) < history.len() => {
+                    history
+                        .iter()
+                        .rev()
+                        .skip(instant)
+                        .take(task.task.props().period as usize)
+                        .fold(0.0, |acc, t| {
+                            if let Some(t) = t {
+                                if *t == task.task.props().id {
+                                    acc + 1.0
+                                } else {
+                                    acc
+                                }
+                            } else {
+                                acc
+                            }
+                        })
+                }
+                _ => -1.0,
+            };
 
             input.push(wcet_l);
             input.push(deadline);
-            input.push(time_since_last_run);
-            input.push(instants_executed);
+            input.push(offset);
+            input.push(priority);
+            input.push(last_job_execution_time);
+
+            println!(
+                "Task {}: WCET_L: {}, Deadline: {}, Offset: {}, Priority: {}, Last job execution time: {}",
+                task.task.props().id, wcet_l, deadline, offset, priority, last_job_execution_time);
         }
 
         Tensor::from_slice(input.as_slice())
     }
 
     pub fn sample_simulator_action(simulator: &Simulator) -> SimulatorAction {
-        let ltasks = simulator
-            .tasks
-            .iter()
-            .filter(|t| matches!(t.task, Task::LTask(_)))
-            .collect::<Vec<_>>();
-        let index = rand::random::<usize>() % ltasks.len();
+        let index = rand::random::<usize>() % (simulator.tasks.len() + 1);
+
+        if index == simulator.tasks.len() {
+            return SimulatorAction::None;
+        }
+
         let action_variant = rand::random::<usize>() % 2;
         match action_variant {
-            0 => SimulatorAction::WcetIncrease(ltasks[index].task.props().id),
-            1 => SimulatorAction::WcetDecrease(ltasks[index].task.props().id),
+            0 => SimulatorAction::WcetIncrease(simulator.tasks[index].task.props().id),
+            1 => SimulatorAction::WcetDecrease(simulator.tasks[index].task.props().id),
             _ => unreachable!(),
         }
     }
@@ -351,37 +365,17 @@ impl SimulatorAgent {
         environment: &Tensor,
         simulator: &Simulator,
     ) -> SimulatorAction {
-        let number_of_actions = Self::number_of_actions(&simulator.tasks);
-
         let mut rng = rand::thread_rng();
         let random_number: f32 = rng.gen::<f32>();
         if random_number > epsilon {
+            println!("Using policy.");
             let value = tch::no_grad(|| policy.forward(storage, environment));
+            println!("Q-values: {}", value);
             let action_index = value.argmax(1, false).int64_value(&[]) as usize;
             Self::index_to_action(action_index, simulator)
         } else {
+            println!("Using random action.");
             Self::sample_simulator_action(simulator)
-        }
-    }
-
-    pub fn epsilon_update(
-        cur_reward: f32,
-        min_reward: f32,
-        max_reward: f32,
-        min_eps: f32,
-        max_eps: f32,
-    ) -> f32 {
-        if cur_reward < min_reward {
-            return max_eps;
-        }
-        let reward_range = max_reward - min_reward;
-        let eps_range = max_eps - min_eps;
-        let min_update = eps_range / reward_range;
-        let new_eps = (max_reward - cur_reward) * min_update;
-        if new_eps < min_eps {
-            min_eps
-        } else {
-            new_eps
         }
     }
 
@@ -392,9 +386,8 @@ impl SimulatorAgent {
 
     pub fn number_of_features(tasks: &[SimulatorTask]) -> usize {
         // We'll place the tasks from task to bottom.
-        // Each task has 4 features: WCET_L, deadline, last unknown activation time,
-        // and number of instants executed since last time.
-        tasks.len() * 4
+        // Each task has 5 features: WCET_L, deadline, offset, priority, last job execution time.
+        tasks.len() * 5
     }
 
     fn index_to_action(index: usize, simulator: &Simulator) -> SimulatorAction {
