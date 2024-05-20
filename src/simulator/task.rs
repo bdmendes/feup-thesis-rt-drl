@@ -1,6 +1,7 @@
 use super::SimulatorMode;
 
-pub type TaskId = u32;
+pub type TaskId = u64;
+pub type TimeUnit = u64;
 
 #[derive(Clone, Debug)]
 pub enum Task {
@@ -23,7 +24,7 @@ impl Task {
         }
     }
 
-    pub fn sample_execution_time(expected_execution_time: u32) -> u32 {
+    pub fn sample_execution_time(expected_execution_time: TimeUnit) -> TimeUnit {
         // TODO: Implement random execution time
         expected_execution_time
     }
@@ -32,14 +33,14 @@ impl Task {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TaskProps {
     pub id: TaskId,
-    pub wcet_l: u32,
-    pub wcet_h: u32,
-    pub offset: u32,
-    pub period: u32,
+    pub wcet_l: TimeUnit,
+    pub wcet_h: TimeUnit,
+    pub offset: TimeUnit,
+    pub period: TimeUnit,
 }
 
 impl TaskProps {
-    pub fn wcet_in_mode(&self, mode: SimulatorMode) -> u32 {
+    pub fn wcet_in_mode(&self, mode: SimulatorMode) -> TimeUnit {
         match mode {
             SimulatorMode::LMode => self.wcet_l,
             SimulatorMode::HMode => self.wcet_h,

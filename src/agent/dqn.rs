@@ -21,9 +21,9 @@ pub struct Policy {
 impl Policy {
     pub fn new(
         storage: &mut TensorStorage,
-        number_features: u64,
-        number_actions: u64,
-        hidden_size: u64,
+        number_features: usize,
+        number_actions: usize,
+        hidden_size: usize,
         activation: ActivationFunction,
     ) -> Policy {
         let l1 = LinearLayer::new(storage, number_features as i64, hidden_size as i64);

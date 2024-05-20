@@ -122,7 +122,7 @@ impl SimulatorAgent {
         gamma: f32,
         update_freq: usize,
         learning_rate: f32,
-        hidden_size: u64,
+        hidden_size: usize,
         sample_batch_size: usize,
         activation: dqn::ActivationFunction,
         number_of_actions: usize,
@@ -132,16 +132,16 @@ impl SimulatorAgent {
         let mut memory_policy = TensorStorage::default();
         let policy_network = Policy::new(
             &mut memory_policy,
-            number_of_features as u64,
-            number_of_actions as u64,
+            number_of_features,
+            number_of_actions,
             hidden_size,
             activation,
         );
         let mut memory_target = TensorStorage::default();
         let target_network = Policy::new(
             &mut memory_target,
-            number_of_features as u64,
-            number_of_actions as u64,
+            number_of_features,
+            number_of_actions,
             hidden_size,
             activation,
         );

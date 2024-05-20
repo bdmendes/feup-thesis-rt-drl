@@ -1,4 +1,7 @@
-use super::{task::Task, SimulatorMode, SimulatorTask};
+use super::{
+    task::{Task, TimeUnit},
+    SimulatorMode, SimulatorTask,
+};
 
 pub fn feasible_schedule_design_time(tasks: &[SimulatorTask]) -> bool {
     // At design time, we assess the full recurrence for testing the AMC feasibility.
@@ -17,7 +20,7 @@ fn response_time(
     task: &SimulatorTask,
     tasks: &[SimulatorTask],
     mode: SimulatorMode,
-) -> Option<u32> {
+) -> Option<TimeUnit> {
     let wcet = task.task.props().wcet_in_mode(mode);
     let mut response_time = wcet as f32;
 
@@ -32,7 +35,7 @@ fn response_time(
 
         let new_response_time = wcet as f32 + interference;
         if new_response_time == response_time {
-            return Some(new_response_time.ceil() as u32);
+            return Some(new_response_time.ceil() as TimeUnit);
         } else {
             response_time = new_response_time;
         }
@@ -74,7 +77,7 @@ fn feasible_in_mode(tasks: &[SimulatorTask], mode: SimulatorMode) -> bool {
 fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     task: &SimulatorTask,
     tasks: &[SimulatorTask],
-) -> Option<u32> {
+) -> Option<TimeUnit> {
     if !matches!(task.task, Task::HTask(_)) {
         return None;
     }
@@ -85,20 +88,20 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
         .map(|t| {
             ((response_time(task, tasks, SimulatorMode::LMode).unwrap() as f32)
                 / t.task.props().period as f32)
-                .ceil() as u32
+                .ceil() as TimeUnit
                 * t.task.props().wcet_in_mode(SimulatorMode::LMode)
         })
-        .sum::<u32>();
+        .sum::<TimeUnit>();
 
     if APPROXIMATE {
         let interference_by_htasks = tasks
             .iter()
             .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority < task.priority)
             .map(|t| {
-                (task.task.props().period as f32 / t.task.props().period as f32).ceil() as u32
+                (task.task.props().period as f32 / t.task.props().period as f32).ceil() as TimeUnit
                     * t.task.props().wcet_in_mode(SimulatorMode::HMode)
             })
-            .sum::<u32>();
+            .sum::<TimeUnit>();
 
         return Some(
             task.task.props().wcet_in_mode(SimulatorMode::HMode)
@@ -114,10 +117,10 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
             .iter()
             .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority < task.priority)
             .map(|t| {
-                (total_response_time as f32 / t.task.props().period as f32).ceil() as u32
+                (total_response_time as f32 / t.task.props().period as f32).ceil() as TimeUnit
                     * t.task.props().wcet_in_mode(SimulatorMode::HMode)
             })
-            .sum::<u32>();
+            .sum::<TimeUnit>();
 
         let new_total_response_time = task.task.props().wcet_in_mode(SimulatorMode::HMode)
             + interference_by_htasks
@@ -158,14 +161,14 @@ fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &[SimulatorTask]) -> bo
 #[cfg(test)]
 mod tests {
     use crate::simulator::{
-        task::TaskProps,
+        task::{TaskProps, TimeUnit},
         validation::{
             feasible_in_mode, feasible_mode_changes, response_time, response_time_in_mode_changes,
         },
         SimulatorTask,
     };
 
-    const UNUSED_TIME: u32 = u32::MAX;
+    const UNUSED_TIME: TimeUnit = TimeUnit::MAX;
 
     #[test]
     fn feasible_in_mode_1() {

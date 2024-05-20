@@ -1,8 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
-
+use self::task::{Task, TaskId, TimeUnit};
 use crate::agent::SimulatorAgent;
-
-use self::task::{Task, TaskId};
+use std::{cell::RefCell, rc::Rc};
 
 pub mod task;
 pub mod validation;
@@ -10,34 +8,30 @@ pub mod validation;
 #[derive(Clone, Debug)]
 pub struct SimulatorTask {
     pub task: Task,
-    pub priority: u32,
-    pub execution_avg: u32,
-    pub execution_min: u32,
-    pub execution_max: u32,
+    pub priority: TimeUnit,
+    pub acet: TimeUnit, // Average Case Execution Time
+    pub bcet: TimeUnit, // Best Case Execution Time
 }
 
 impl SimulatorTask {
-    pub fn new(task: Task, execution_avg: u32, execution_min: u32, execution_max: u32) -> Self {
-        assert!(execution_avg > 0, "Execution time must be greater than 0.");
-        assert!(execution_min > 0, "Execution time must be greater than 0.");
-        assert!(execution_max > 0, "Execution time must be greater than 0.");
+    pub fn new(task: Task, acet: TimeUnit, bcet: TimeUnit) -> Self {
+        assert!(acet > 0, "Execution time must be greater than 0.");
+        assert!(bcet > 0, "Execution time must be greater than 0.");
         Self {
             task: task.clone(),
             priority: task.props().period, // RMS (Rate Monotonic Scheduling)
-            execution_avg,
-            execution_min,
-            execution_max,
+            acet,
+            bcet,
         }
     }
 
-    pub fn new_with_custom_priority(task: Task, priority: u32, execution_time: u32) -> Self {
-        assert!(execution_time > 0, "Execution time must be greater than 0.");
+    pub fn new_with_custom_priority(task: Task, priority: TimeUnit, acet: TimeUnit) -> Self {
+        assert!(acet > 0, "Execution time must be greater than 0.");
         Self {
             task: task.clone(),
             priority,
-            execution_avg: execution_time,
-            execution_min: execution_time,
-            execution_max: execution_time,
+            acet,
+            bcet: acet,
         }
     }
 }
@@ -45,8 +39,8 @@ impl SimulatorTask {
 #[derive(Debug, PartialEq, Copy, Clone)]
 struct SimulatorJob {
     task_id: TaskId,
-    running_for: u32,
-    remaining: u32,
+    running_for: TimeUnit,
+    remaining: TimeUnit,
 }
 
 impl SimulatorJob {
@@ -67,9 +61,9 @@ pub enum SimulatorMode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimulatorEvent {
-    Start(TaskId, u32),
-    TaskKill(TaskId, u32),
-    ModeChange(SimulatorMode, u32),
+    Start(TaskId, TimeUnit),
+    TaskKill(TaskId, TimeUnit),
+    ModeChange(SimulatorMode, TimeUnit),
     EndSimulation,
 }
 
@@ -95,7 +89,10 @@ pub struct Simulator {
 }
 
 impl Simulator {
-    pub fn run(&mut self, duration: u32) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent>) {
+    pub fn run(
+        &mut self,
+        duration: TimeUnit,
+    ) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent>) {
         let mut run_history = vec![];
         let mut simulator_events_history = vec![];
         let mut current_mode = SimulatorMode::LMode;
@@ -136,9 +133,9 @@ impl Simulator {
                             task_id: task.task.props().id,
                             running_for: 0,
                             remaining: if self.random_execution_time {
-                                Task::sample_execution_time(task.execution_avg)
+                                Task::sample_execution_time(task.acet)
                             } else {
-                                task.execution_avg
+                                task.acet
                             },
                         }
                     }
