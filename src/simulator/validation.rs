@@ -165,41 +165,43 @@ mod tests {
         SimulatorTask,
     };
 
+    const UNUSED_TIME: u32 = u32::MAX;
+
     #[test]
     fn feasible_in_mode_1() {
-        let task1 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+        let task1 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 4,
                 wcet_h: 4,
                 offset: 0,
                 period: 8,
             }),
-            priority: 1,
-            expected_execution_time: 0,
-        };
-        let task2 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            1,
+            UNUSED_TIME,
+        );
+        let task2 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 8,
             }),
-            priority: 2,
-            expected_execution_time: 0,
-        };
-        let task3 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            2,
+            UNUSED_TIME,
+        );
+        let task3 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 8,
             }),
-            priority: 3,
-            expected_execution_time: 0,
-        };
+            3,
+            UNUSED_TIME,
+        );
 
         let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
@@ -224,39 +226,39 @@ mod tests {
 
     #[test]
     fn non_feasible_in_mode_1() {
-        let task1 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+        let task1 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 4,
                 wcet_h: 4,
                 offset: 0,
                 period: 8,
             }),
-            priority: 1,
-            expected_execution_time: 0,
-        };
-        let task2 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            1,
+            UNUSED_TIME,
+        );
+        let task2 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 8,
             }),
-            priority: 2,
-            expected_execution_time: 0,
-        };
-        let task3 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            2,
+            UNUSED_TIME,
+        );
+        let task3 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 3,
                 wcet_h: 3,
                 offset: 0,
                 period: 8,
             }),
-            priority: 3,
-            expected_execution_time: 0,
-        };
+            3,
+            UNUSED_TIME,
+        );
 
         let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
@@ -281,61 +283,61 @@ mod tests {
 
     #[test]
     fn non_feasible_in_mode_2() {
-        let task1 = SimulatorTask {
-            task: crate::simulator::task::Task::HTask(TaskProps {
+        let task1 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
                 wcet_h: 1,
                 offset: 0,
                 period: 8,
             }),
-            priority: 1,
-            expected_execution_time: 0,
-        };
-        let task2 = SimulatorTask {
-            task: crate::simulator::task::Task::HTask(TaskProps {
+            1,
+            UNUSED_TIME,
+        );
+        let task2 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 1,
                 wcet_h: 1,
                 offset: 0,
                 period: 8,
             }),
-            priority: 2,
-            expected_execution_time: 0,
-        };
-        let task3 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            2,
+            UNUSED_TIME,
+        );
+        let task3 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 4,
                 wcet_h: 4,
                 offset: 0,
                 period: 10,
             }),
-            priority: 3,
-            expected_execution_time: 0,
-        };
-        let task4 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            3,
+            UNUSED_TIME,
+        );
+        let task4 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 4,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 10,
             }),
-            priority: 4,
-            expected_execution_time: 0,
-        };
-        let task5 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            4,
+            UNUSED_TIME,
+        );
+        let task5 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 5,
                 wcet_l: 3,
                 wcet_h: 3,
                 offset: 0,
                 period: 10,
             }),
-            priority: 5,
-            expected_execution_time: 0,
-        };
+            5,
+            UNUSED_TIME,
+        );
 
         let tasks = vec![
             task1.clone(),
@@ -388,39 +390,39 @@ mod tests {
 
     #[test]
     fn feasible_mode_change_1() {
-        let task1 = SimulatorTask {
-            task: crate::simulator::task::Task::HTask(TaskProps {
+        let task1 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 3,
                 wcet_h: 4,
                 offset: 0,
                 period: 8,
             }),
-            priority: 3,
-            expected_execution_time: 0,
-        };
-        let task2 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            3,
+            UNUSED_TIME,
+        );
+        let task2 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 8,
             }),
-            priority: 1,
-            expected_execution_time: 0,
-        };
-        let task3 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            1,
+            UNUSED_TIME,
+        );
+        let task3 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 8,
             }),
-            priority: 2,
-            expected_execution_time: 0,
-        };
+            2,
+            UNUSED_TIME,
+        );
 
         let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
@@ -434,39 +436,39 @@ mod tests {
 
     #[test]
     fn feasible_mode_change_2() {
-        let task1 = SimulatorTask {
-            task: crate::simulator::task::Task::HTask(TaskProps {
+        let task1 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 3,
                 wcet_h: 4,
                 offset: 0,
                 period: 8,
             }),
-            priority: 3,
-            expected_execution_time: 0,
-        };
-        let task2 = SimulatorTask {
-            task: crate::simulator::task::Task::HTask(TaskProps {
+            3,
+            UNUSED_TIME,
+        );
+        let task2 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 8,
             }),
-            priority: 1,
-            expected_execution_time: 0,
-        };
-        let task3 = SimulatorTask {
-            task: crate::simulator::task::Task::LTask(TaskProps {
+            1,
+            UNUSED_TIME,
+        );
+        let task3 = SimulatorTask::new_with_custom_priority(
+            crate::simulator::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 2,
                 wcet_h: 2,
                 offset: 0,
                 period: 8,
             }),
-            priority: 2,
-            expected_execution_time: 0,
-        };
+            2,
+            UNUSED_TIME,
+        );
 
         let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 

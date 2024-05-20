@@ -11,15 +11,33 @@ pub mod validation;
 pub struct SimulatorTask {
     pub task: Task,
     pub priority: u32,
-    pub expected_execution_time: u32,
+    pub execution_avg: u32,
+    pub execution_min: u32,
+    pub execution_max: u32,
 }
 
 impl SimulatorTask {
-    pub fn new(task: Task, priority: u32, expected_execution_time: u32) -> Self {
+    pub fn new(task: Task, execution_avg: u32, execution_min: u32, execution_max: u32) -> Self {
+        assert!(execution_avg > 0, "Execution time must be greater than 0.");
+        assert!(execution_min > 0, "Execution time must be greater than 0.");
+        assert!(execution_max > 0, "Execution time must be greater than 0.");
         Self {
-            task,
+            task: task.clone(),
+            priority: task.props().period, // RMS (Rate Monotonic Scheduling)
+            execution_avg,
+            execution_min,
+            execution_max,
+        }
+    }
+
+    pub fn new_with_custom_priority(task: Task, priority: u32, execution_time: u32) -> Self {
+        assert!(execution_time > 0, "Execution time must be greater than 0.");
+        Self {
+            task: task.clone(),
             priority,
-            expected_execution_time,
+            execution_avg: execution_time,
+            execution_min: execution_time,
+            execution_max: execution_time,
         }
     }
 }
@@ -118,9 +136,9 @@ impl Simulator {
                             task_id: task.task.props().id,
                             running_for: 0,
                             remaining: if self.random_execution_time {
-                                Task::sample_execution_time(task.expected_execution_time)
+                                Task::sample_execution_time(task.execution_avg)
                             } else {
-                                task.expected_execution_time
+                                task.execution_avg
                             },
                         }
                     }
@@ -165,14 +183,15 @@ impl Simulator {
                     *this_task_start_event =
                         SimulatorEvent::Start(job.task(self).task.props().id, new_instant);
 
-                    // Signal task start to simulator.
                     simulator_events_history
                         .push(SimulatorEvent::Start(job.task(self).task.props().id, time));
-                    self.agent
-                        .as_ref()
-                        .unwrap()
-                        .borrow_mut()
-                        .push_event(SimulatorEvent::Start(job.task(self).task.props().id, time));
+
+                    if self.agent.is_some() {
+                        // Signal task start to agent.
+                        self.agent.as_ref().unwrap().borrow_mut().push_event(
+                            SimulatorEvent::Start(job.task(self).task.props().id, time),
+                        );
+                    }
                 }
 
                 println!(
@@ -213,11 +232,15 @@ impl Simulator {
                             .retain(|job| matches!(job.task(self).task, Task::HTask(_)));
                         simulator_events_history
                             .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
-                        self.agent
-                            .as_ref()
-                            .unwrap()
-                            .borrow_mut()
-                            .push_event(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
+
+                        // Inform the agent of the mode change.
+                        if self.agent.is_some() {
+                            self.agent
+                                .as_ref()
+                                .unwrap()
+                                .borrow_mut()
+                                .push_event(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
+                        }
                     } else {
                         // We could go about this in some ways, but in an attempt to try to preserve
                         // more LTasks, we only kill the current job.
@@ -229,9 +252,13 @@ impl Simulator {
                             job.task(self).task.props().id,
                             time,
                         ));
-                        self.agent.as_ref().unwrap().borrow_mut().push_event(
-                            SimulatorEvent::TaskKill(job.task(self).task.props().id, time),
-                        );
+
+                        if self.agent.is_some() {
+                            // Inform the agent of the task kill.
+                            self.agent.as_ref().unwrap().borrow_mut().push_event(
+                                SimulatorEvent::TaskKill(job.task(self).task.props().id, time),
+                            );
+                        }
                     }
                 }
             } else {
@@ -240,19 +267,25 @@ impl Simulator {
                 // and tasks props changes.
                 println!("No task is running. Running agent.");
 
-                let agent = self.agent.take().unwrap();
-                agent.borrow_mut().activate(self, &run_history);
-                self.agent = Some(agent);
+                if self.agent.is_some() {
+                    let agent = self.agent.take().unwrap();
+                    agent.borrow_mut().activate(self, &run_history);
+                    self.agent = Some(agent);
+                }
 
                 if current_mode != SimulatorMode::LMode {
                     current_mode = SimulatorMode::LMode;
                     simulator_events_history
                         .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
-                    self.agent
-                        .as_ref()
-                        .unwrap()
-                        .borrow_mut()
-                        .push_event(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
+
+                    if self.agent.is_some() {
+                        // Inform the agent of the mode change.
+                        self.agent
+                            .as_ref()
+                            .unwrap()
+                            .borrow_mut()
+                            .push_event(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
+                    }
                 }
 
                 run_history.push(None);
@@ -269,10 +302,19 @@ mod tests {
 
     use super::{task::TaskProps, Simulator, SimulatorTask};
 
+    fn assert_events_eq(events: Vec<SimulatorEvent>, expected: Vec<SimulatorEvent>) {
+        let events_with_stripped_start = events
+            .iter()
+            .filter(|e| !matches!(e, SimulatorEvent::Start(_, _)))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(events_with_stripped_start, expected);
+    }
+
     #[test]
 
     fn same_criticality() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
@@ -283,7 +325,7 @@ mod tests {
             1,
             1,
         );
-        let task2 = SimulatorTask::new(
+        let task2 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
@@ -318,13 +360,13 @@ mod tests {
             ]
         );
 
-        assert_eq!(events, vec![]);
+        assert_events_eq(events, vec![]);
     }
 
     #[test]
 
     fn same_criticality_2() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
@@ -335,7 +377,7 @@ mod tests {
             2,
             2,
         );
-        let task2 = SimulatorTask::new(
+        let task2 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
@@ -346,7 +388,7 @@ mod tests {
             3,
             2,
         );
-        let task3 = SimulatorTask::new(
+        let task3 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 3,
                 wcet_l: 1,
@@ -381,12 +423,12 @@ mod tests {
             ]
         );
 
-        assert_eq!(events, vec![]);
+        assert_events_eq(events, vec![]);
     }
 
     #[test]
     fn different_criticality() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
@@ -397,7 +439,7 @@ mod tests {
             1,
             1,
         );
-        let task2 = SimulatorTask::new(
+        let task2 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
@@ -430,12 +472,12 @@ mod tests {
             ]
         );
 
-        assert_eq!(events, vec![]);
+        assert_events_eq(events, vec![]);
     }
 
     #[test]
     fn different_criticality_task_kill() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
@@ -446,7 +488,7 @@ mod tests {
             1,
             3,
         );
-        let task2 = SimulatorTask::new(
+        let task2 = SimulatorTask::new_with_custom_priority(
             super::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
@@ -483,19 +525,19 @@ mod tests {
             ]
         );
 
-        assert_eq!(
+        assert_events_eq(
             events,
             vec![
                 SimulatorEvent::TaskKill(task1.task.props().id, 1),
                 SimulatorEvent::TaskKill(task1.task.props().id, 6),
                 SimulatorEvent::TaskKill(task1.task.props().id, 11),
-            ]
+            ],
         );
     }
 
     #[test]
     fn different_criticality_mode_change() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
@@ -506,7 +548,7 @@ mod tests {
             1,
             3,
         );
-        let task2 = SimulatorTask::new(
+        let task2 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 2,
@@ -543,21 +585,21 @@ mod tests {
             ]
         );
 
-        assert_eq!(
+        assert_events_eq(
             events,
             vec![
                 SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 1),
                 SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 3),
                 SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 6),
                 SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 8),
-                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 11)
-            ]
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 11),
+            ],
         );
     }
 
     #[test]
     fn non_feasible_simple() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 1,
                 wcet_l: 1,
@@ -568,7 +610,7 @@ mod tests {
             1,
             1,
         );
-        let task2 = SimulatorTask::new(
+        let task2 = SimulatorTask::new_with_custom_priority(
             super::task::Task::LTask(TaskProps {
                 id: 2,
                 wcet_l: 3,
@@ -588,12 +630,12 @@ mod tests {
         let (tasks, events) = simulator.run(10);
 
         assert_eq!(tasks, None);
-        assert_eq!(events, vec![]);
+        assert_events_eq(events, vec![]);
     }
 
     #[test]
     fn non_feasible_mode_change() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
@@ -604,7 +646,7 @@ mod tests {
             1,
             3,
         );
-        let task2 = SimulatorTask::new(
+        let task2 = SimulatorTask::new_with_custom_priority(
             super::task::Task::HTask(TaskProps {
                 id: 2,
                 wcet_l: 3,
@@ -624,18 +666,18 @@ mod tests {
         let (tasks, events) = simulator.run(10);
 
         assert_eq!(tasks, None);
-        assert_eq!(
+        assert_events_eq(
             events,
             vec![SimulatorEvent::ModeChange(
                 crate::simulator::SimulatorMode::HMode,
-                1
-            )]
+                1,
+            )],
         );
     }
 
     #[test]
     fn non_feasible_exceed_wcet_h() {
-        let task1 = SimulatorTask::new(
+        let task1 = SimulatorTask::new_with_custom_priority(
             super::task::Task::HTask(TaskProps {
                 id: 1,
                 wcet_l: 2,
@@ -654,12 +696,12 @@ mod tests {
         let (tasks, events) = simulator.run(10);
 
         assert_eq!(tasks, None);
-        assert_eq!(
+        assert_events_eq(
             events,
             vec![SimulatorEvent::ModeChange(
                 crate::simulator::SimulatorMode::HMode,
-                1
-            )]
+                1,
+            )],
         );
     }
 }
