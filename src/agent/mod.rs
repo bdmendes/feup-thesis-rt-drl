@@ -2,9 +2,10 @@ use self::dqn::{Policy, ReplayMemory};
 use crate::agent::dqn::Transition;
 use crate::ml::tensor::{mean_squared_error, TensorStorage};
 use crate::ml::ComputeModel;
+use crate::simulator::task::SimulatorTask;
 use crate::simulator::validation::feasible_schedule_online;
+use crate::simulator::SimulatorMode;
 use crate::simulator::{task::TaskId, Simulator, SimulatorEvent};
-use crate::simulator::{SimulatorMode, SimulatorTask};
 use rand::Rng;
 use tch::Tensor;
 
@@ -16,6 +17,7 @@ pub const DEFAULT_GAMMA: f32 = 0.99;
 pub const DEFAULT_UPDATE_FREQ: usize = 10;
 pub const DEFAULT_LEARNING_RATE: f32 = 0.00005;
 pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 8;
+pub const DEFAULT_HIDDEN_SIZE: usize = 128;
 
 #[derive(Debug)]
 pub enum SimulatorAction {

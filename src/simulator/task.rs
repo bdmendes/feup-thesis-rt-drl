@@ -1,3 +1,8 @@
+use probability::{
+    distribution::{Sample, Triangular},
+    source,
+};
+
 use super::SimulatorMode;
 
 pub type TaskId = u64;
@@ -24,9 +29,14 @@ impl Task {
         }
     }
 
-    pub fn sample_execution_time(expected_execution_time: TimeUnit) -> TimeUnit {
-        // TODO: Implement random execution time
-        expected_execution_time
+    pub fn sample_execution_time(acet: TimeUnit, bcet: TimeUnit, wcet: TimeUnit) -> TimeUnit {
+        let mut source = source::default(42);
+        let time =
+            Triangular::new(bcet as f64, wcet as f64, acet as f64).sample(&mut source) as TimeUnit;
+        if time > acet {
+            panic!("Hey");
+        }
+        time
     }
 }
 
@@ -44,6 +54,37 @@ impl TaskProps {
         match mode {
             SimulatorMode::LMode => self.wcet_l,
             SimulatorMode::HMode => self.wcet_h,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SimulatorTask {
+    pub task: Task,
+    pub priority: TimeUnit,
+    pub acet: TimeUnit, // Average Case Execution Time
+    pub bcet: TimeUnit, // Best Case Execution Time
+}
+
+impl SimulatorTask {
+    pub fn new(task: Task, acet: TimeUnit, bcet: TimeUnit) -> Self {
+        assert!(acet > 0, "Execution time must be greater than 0.");
+        assert!(bcet > 0, "Execution time must be greater than 0.");
+        Self {
+            task: task.clone(),
+            priority: task.props().period, // RMS (Rate Monotonic Scheduling)
+            acet,
+            bcet,
+        }
+    }
+
+    pub fn new_with_custom_priority(task: Task, priority: TimeUnit, acet: TimeUnit) -> Self {
+        assert!(acet > 0, "Execution time must be greater than 0.");
+        Self {
+            task: task.clone(),
+            priority,
+            acet,
+            bcet: acet,
         }
     }
 }

@@ -1,40 +1,9 @@
-use self::task::{Task, TaskId, TimeUnit};
+use self::task::{SimulatorTask, Task, TaskId, TimeUnit};
 use crate::agent::SimulatorAgent;
 use std::{cell::RefCell, rc::Rc};
 
 pub mod task;
 pub mod validation;
-
-#[derive(Clone, Debug)]
-pub struct SimulatorTask {
-    pub task: Task,
-    pub priority: TimeUnit,
-    pub acet: TimeUnit, // Average Case Execution Time
-    pub bcet: TimeUnit, // Best Case Execution Time
-}
-
-impl SimulatorTask {
-    pub fn new(task: Task, acet: TimeUnit, bcet: TimeUnit) -> Self {
-        assert!(acet > 0, "Execution time must be greater than 0.");
-        assert!(bcet > 0, "Execution time must be greater than 0.");
-        Self {
-            task: task.clone(),
-            priority: task.props().period, // RMS (Rate Monotonic Scheduling)
-            acet,
-            bcet,
-        }
-    }
-
-    pub fn new_with_custom_priority(task: Task, priority: TimeUnit, acet: TimeUnit) -> Self {
-        assert!(acet > 0, "Execution time must be greater than 0.");
-        Self {
-            task: task.clone(),
-            priority,
-            acet,
-            bcet: acet,
-        }
-    }
-}
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 struct SimulatorJob {
@@ -133,7 +102,11 @@ impl Simulator {
                             task_id: task.task.props().id,
                             running_for: 0,
                             remaining: if self.random_execution_time {
-                                Task::sample_execution_time(task.acet)
+                                Task::sample_execution_time(
+                                    task.acet,
+                                    task.bcet,
+                                    task.task.props().wcet_h,
+                                )
                             } else {
                                 task.acet
                             },
