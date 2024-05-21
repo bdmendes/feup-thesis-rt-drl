@@ -302,13 +302,18 @@ impl SimulatorAgent {
             // Assuming there are no overlapping jobs of the same task in a period,
             // the last execution time is the number of instants of the task
             // since the last one + period.
-            let last_executed_distance = history.iter().rev().position(|t| {
-                if let Some(t) = t {
-                    *t == task.task.props().id
-                } else {
-                    false
-                }
-            });
+            let last_executed_distance =
+                history
+                    .iter()
+                    .rev()
+                    .skip_while(|t| t.is_none())
+                    .position(|t| {
+                        if let Some(t) = t {
+                            *t == task.task.props().id
+                        } else {
+                            false
+                        }
+                    });
             let last_job_execution_time = match last_executed_distance {
                 Some(instant) if (instant + task.task.props().period as usize) < history.len() => {
                     history

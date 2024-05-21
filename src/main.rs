@@ -10,7 +10,9 @@ use generator::{
 };
 use simulator::Simulator;
 
-use crate::generator::AVG_MIN_RUNNABLES_PER_TASK;
+use crate::{
+    generator::AVG_MIN_RUNNABLES_PER_TASK, simulator::validation::feasible_schedule_design_time,
+};
 
 pub mod agent;
 pub mod generator;
@@ -23,31 +25,33 @@ fn main() {
         AVG_MIN_RUNNABLES_PER_TASK,
         AVG_AVG_RUNNABLES_PER_TASK,
         AVG_MAX_RUNNABLES_PER_TASK,
-        AVG_TOTAL_RUNNABLES / AVG_MAX_RUNNABLES_PER_TASK,
+        5,
     );
 
     for task in &tasks {
         println!("{:?}", task);
     }
 
-    let number_of_actions = SimulatorAgent::number_of_actions(&tasks);
-    let number_of_features = SimulatorAgent::number_of_features(&tasks);
+    assert!(feasible_schedule_design_time(&tasks));
+
+    let agent = SimulatorAgent::new(
+        DEFAULT_MEM_SIZE,
+        DEFAULT_MIN_MEM_SIZE,
+        DEFAULT_GAMMA,
+        DEFAULT_UPDATE_FREQ,
+        DEFAULT_LEARNING_RATE,
+        DEFAULT_HIDDEN_SIZE,
+        DEFAULT_SAMPLE_BATCH_SIZE,
+        ActivationFunction::ReLU,
+        SimulatorAgent::number_of_actions(&tasks),
+        SimulatorAgent::number_of_features(&tasks),
+    );
+
     let mut simulator = Simulator {
         tasks,
         random_execution_time: true,
-        agent: Some(Rc::new(RefCell::new(agent::SimulatorAgent::new(
-            DEFAULT_MEM_SIZE,
-            DEFAULT_MIN_MEM_SIZE,
-            DEFAULT_GAMMA,
-            DEFAULT_UPDATE_FREQ,
-            DEFAULT_LEARNING_RATE,
-            DEFAULT_HIDDEN_SIZE,
-            DEFAULT_SAMPLE_BATCH_SIZE,
-            ActivationFunction::ReLU,
-            number_of_actions,
-            number_of_features,
-        )))),
+        agent: Some(Rc::new(RefCell::new(agent))),
     };
 
-    simulator.run(500_000_000_000);
+    simulator.run::<false>(500_000_000_000);
 }

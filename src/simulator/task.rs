@@ -1,7 +1,5 @@
-use probability::{
-    distribution::{Sample, Triangular},
-    source,
-};
+use probability::distribution::{Sample, Triangular};
+use probability::source::Xorshift128Plus;
 
 use super::SimulatorMode;
 
@@ -29,13 +27,18 @@ impl Task {
         }
     }
 
-    pub fn sample_execution_time(acet: TimeUnit, bcet: TimeUnit, wcet: TimeUnit) -> TimeUnit {
-        let mut source = source::default(42);
-        let time =
-            Triangular::new(bcet as f64, wcet as f64, acet as f64).sample(&mut source) as TimeUnit;
-        if time > acet {
-            panic!("Hey");
-        }
+    pub fn sample_execution_time(
+        acet: TimeUnit,
+        bcet: TimeUnit,
+        wcet: TimeUnit,
+        source: &mut Xorshift128Plus,
+    ) -> TimeUnit {
+        let dist = Triangular::new(bcet as f64, wcet as f64, acet as f64);
+        let time = dist.sample(source) as TimeUnit;
+        println!(
+            "sampled time: {}; bcet: {}, acet: {}, wcet: {}",
+            time, bcet, acet, wcet
+        );
         time
     }
 }
