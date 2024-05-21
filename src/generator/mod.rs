@@ -9,9 +9,6 @@ use std::time::Duration;
 
 use crate::simulator::task::{SimulatorTask, Task, TaskProps, TimeUnit};
 
-pub const AVG_MIN_RUNNABLES_PER_TASK: usize = 2;
-pub const AVG_AVG_RUNNABLES_PER_TASK: usize = 3;
-pub const AVG_MAX_RUNNABLES_PER_TASK: usize = 5;
 pub const AVG_TOTAL_RUNNABLES: usize = 1500;
 
 // Data gathered from "Real World Automotive Benchmarks For Free", from
@@ -101,7 +98,7 @@ static BCET_WCET_FACTORS: [[f32; 4]; 10] = [
 ];
 
 #[derive(Clone)]
-pub struct Runnable {
+struct Runnable {
     // Given a runnable with a given period,
     // the average execution time depends on
     // the nature of the task.
@@ -161,122 +158,89 @@ impl Runnable {
 
 pub fn generate_tasks(
     lmode_prob: f64,
-    min_runnables_per_task: usize,
-    avg_runnables_per_task: usize,
-    max_runnables_per_task: usize,
     number_tasks: usize,
-) -> (Vec<SimulatorTask>, Vec<Vec<Runnable>>) {
+    offsets_per_period_take: usize,
+) -> Vec<SimulatorTask> {
+    assert!((0.0..=1.0).contains(&lmode_prob));
+    assert!(number_tasks > 0);
+    assert!(offsets_per_period_take > 0);
+
     let mut tasks = Vec::new();
-    let mut all_runnables = Vec::new();
 
     let mut source = source::default(42);
     let mut rng = rand::thread_rng();
 
     let is_ltask_dist = Uniform::new(0.0, 1.0);
-    let number_runnables_dist = Triangular::new(
-        min_runnables_per_task as f64,
-        max_runnables_per_task as f64,
-        avg_runnables_per_task as f64,
-    );
     let offset_dist = Uniform::new(
         0.0,
         Runnable::duration_to_time_unit(RUNNABLE_PERIODS[0] / 10) as f64,
     );
 
-    for id in 0..number_tasks {
-        let number_runnables = number_runnables_dist.sample(&mut source) as u32;
-
+    let mut id = 0;
+    while tasks.len() < number_tasks {
+        // Choose a period.
         let period = *RUNNABLE_PERIODS
             .choose_weighted(&mut rng, |p| {
                 let index = RUNNABLE_PERIODS.iter().position(|&x| x == *p).unwrap();
                 RUNNABLE_SHARES[index]
             })
             .unwrap();
+        let period_in_units = Runnable::duration_to_time_unit(period);
 
-        let runnables = (0..number_runnables)
+        // Generate a number of runnables.
+        let runnables = (0..offsets_per_period_take)
             .map(|_| Runnable::generate_new(period, &mut source))
             .collect::<Vec<_>>();
 
-        all_runnables.push(runnables.clone());
-
-        let wcet_l = runnables
-            .iter()
-            .map(|r| r.wcet_l_estimate(&mut source))
-            .sum::<TimeUnit>();
-        let wcet_h = runnables.iter().map(|r| r.wcet).sum::<TimeUnit>();
+        // Calculate offset for this take.
         let offset = offset_dist.sample(&mut source) as TimeUnit;
 
-        let props = TaskProps {
-            id: id as u64,
-            wcet_l,
-            wcet_h,
-            offset,
-            period: Runnable::duration_to_time_unit(period),
-        };
+        // Create a task for each runnable.
+        for runnable in runnables {
+            let is_ltask = is_ltask_dist.sample(&mut source) < lmode_prob;
+            let props = TaskProps {
+                id,
+                wcet_l: runnable.wcet_l_estimate(&mut source),
+                wcet_h: runnable.wcet,
+                offset,
+                period: period_in_units,
+            };
+            id += 1;
 
-        let is_ltask = is_ltask_dist.sample(&mut source) < lmode_prob;
+            let task = if is_ltask {
+                Task::LTask(props)
+            } else {
+                Task::HTask(props)
+            };
 
-        let task = if is_ltask {
-            Task::LTask(props)
-        } else {
-            Task::HTask(props)
-        };
-
-        tasks.push(SimulatorTask::new(
-            task,
-            runnables.iter().map(|r| r.acet).sum(),
-            runnables.iter().map(|r| r.bcet).sum(),
-        ));
+            tasks.push(SimulatorTask {
+                task,
+                priority: period_in_units,
+                acet: runnable.acet,
+                bcet: runnable.bcet,
+            });
+        }
     }
 
-    (tasks, all_runnables)
+    tasks.iter().take(number_tasks).cloned().collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::generator::{
-        AVG_AVG_RUNNABLES_PER_TASK, AVG_MAX_RUNNABLES_PER_TASK, AVG_MIN_RUNNABLES_PER_TASK,
-        AVG_TOTAL_RUNNABLES,
-    };
+    use crate::generator::AVG_TOTAL_RUNNABLES;
 
     #[test]
     fn smoke_generator() {
-        let (tasks, runnables) = super::generate_tasks(
-            0.3,
-            AVG_MIN_RUNNABLES_PER_TASK,
-            AVG_AVG_RUNNABLES_PER_TASK,
-            AVG_MAX_RUNNABLES_PER_TASK,
-            AVG_TOTAL_RUNNABLES / AVG_MAX_RUNNABLES_PER_TASK,
-        );
+        let tasks = super::generate_tasks(0.3, AVG_TOTAL_RUNNABLES, 5);
 
-        assert_eq!(
-            tasks.len(),
-            AVG_TOTAL_RUNNABLES / AVG_MAX_RUNNABLES_PER_TASK
-        );
-        assert_eq!(
-            runnables.len(),
-            AVG_TOTAL_RUNNABLES / AVG_MAX_RUNNABLES_PER_TASK
-        );
-
-        for (i, runnable_set) in runnables.iter().enumerate() {
-            assert!(runnable_set.len() >= AVG_MIN_RUNNABLES_PER_TASK);
-            assert!(runnable_set.len() <= AVG_MAX_RUNNABLES_PER_TASK);
-            for runnable in runnable_set {
-                let mut source = probability::source::default(42);
-                assert!(runnable.acet > 0);
-                assert!(runnable.bcet > 0);
-                assert!(runnable.wcet > 0);
-                assert!(runnable.bcet <= runnable.acet);
-                assert!(runnable.acet <= runnable.wcet);
-                assert!(runnable.wcet_l_estimate(&mut source) >= runnable.acet);
-                assert!(runnable.wcet_l_estimate(&mut source) <= runnable.wcet);
-                assert!(runnable.wcet <= tasks[i].task.props().period);
-            }
-        }
+        assert_eq!(tasks.len(), AVG_TOTAL_RUNNABLES);
 
         for task in tasks {
+            assert!(task.task.props().wcet_h <= task.task.props().period);
             assert!(task.task.props().wcet_l <= task.task.props().wcet_h);
             assert!(task.task.props().wcet_l > 0);
+            assert!(task.acet <= task.task.props().wcet_l);
+            assert!(task.bcet <= task.acet);
         }
     }
 }

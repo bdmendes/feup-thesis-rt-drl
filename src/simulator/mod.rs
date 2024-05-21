@@ -33,6 +33,7 @@ pub enum SimulatorMode {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimulatorEvent {
     Start(TaskId, TimeUnit),
+    End(TaskId, TimeUnit),
     TaskKill(TaskId, TimeUnit),
     ModeChange(SimulatorMode, TimeUnit),
     EndSimulation,
@@ -60,7 +61,7 @@ pub struct Simulator {
 }
 
 impl Simulator {
-    pub fn run<const USE_RETURN: bool>(
+    pub fn run<const RETURN_FULL_HISTORY: bool>(
         &mut self,
         duration: TimeUnit,
     ) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent>) {
@@ -158,10 +159,8 @@ impl Simulator {
                     *this_task_start_event =
                         SimulatorEvent::Start(job.task(self).task.props().id, new_instant);
 
-                    if USE_RETURN {
-                        simulator_events_history
-                            .push(SimulatorEvent::Start(job.task(self).task.props().id, time));
-                    }
+                    simulator_events_history
+                        .push(SimulatorEvent::Start(job.task(self).task.props().id, time));
 
                     if self.agent.is_some() {
                         // Signal task start to agent.
@@ -171,16 +170,12 @@ impl Simulator {
                     }
                 }
 
-                // println!(
-                //     "Running task {} for instant {}",
-                //     job.task(self).task.props().id,
-                //     time
-                // );
-
                 job.running_for += 1;
                 job.remaining -= 1;
 
-                run_history.push(Some(job.task(self).task.props().id));
+                if RETURN_FULL_HISTORY {
+                    run_history.push(Some(job.task(self).task.props().id));
+                }
             }
 
             if let Some(job) = current_running_jobs.first().cloned() {
@@ -188,6 +183,19 @@ impl Simulator {
                     // Job has ended. Remove it.
                     current_running_jobs
                         .retain(|j| j.task(self).task.props().id != job.task(self).task.props().id);
+
+                    // Push task end.
+                    simulator_events_history
+                        .push(SimulatorEvent::End(job.task(self).task.props().id, time));
+
+                    // Signal task end to agent.
+                    if self.agent.is_some() {
+                        self.agent
+                            .as_ref()
+                            .unwrap()
+                            .borrow_mut()
+                            .push_event(SimulatorEvent::End(job.task(self).task.props().id, time));
+                    }
                 } else if matches!(current_mode, SimulatorMode::HMode)
                     && job.running_for >= job.task(self).task.props().wcet_h
                 {
@@ -209,10 +217,8 @@ impl Simulator {
                         current_running_jobs
                             .retain(|job| matches!(job.task(self).task, Task::HTask(_)));
 
-                        if USE_RETURN {
-                            simulator_events_history
-                                .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
-                        }
+                        simulator_events_history
+                            .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
 
                         // Inform the agent of the mode change.
                         if self.agent.is_some() {
@@ -230,12 +236,10 @@ impl Simulator {
                             j.task(self).task.props().id != job.task(self).task.props().id
                         });
 
-                        if USE_RETURN {
-                            simulator_events_history.push(SimulatorEvent::TaskKill(
-                                job.task(self).task.props().id,
-                                time,
-                            ));
-                        }
+                        simulator_events_history.push(SimulatorEvent::TaskKill(
+                            job.task(self).task.props().id,
+                            time,
+                        ));
 
                         if self.agent.is_some() {
                             // Inform the agent of the task kill.
@@ -257,17 +261,15 @@ impl Simulator {
                 if self.agent.is_some() {
                     println!("Agent is running.");
                     let agent = self.agent.take().unwrap();
-                    agent.borrow_mut().activate(self, &run_history);
+                    agent.borrow_mut().activate(self);
                     self.agent = Some(agent);
                 }
 
                 if current_mode != SimulatorMode::LMode {
                     current_mode = SimulatorMode::LMode;
 
-                    if USE_RETURN {
-                        simulator_events_history
-                            .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
-                    }
+                    simulator_events_history
+                        .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
 
                     if self.agent.is_some() {
                         // Inform the agent of the mode change.
@@ -279,9 +281,11 @@ impl Simulator {
                     }
                 }
 
-                run_history.push(None);
+                if RETURN_FULL_HISTORY {
+                    run_history.push(None);
+                }
 
-                if USE_RETURN {
+                if RETURN_FULL_HISTORY {
                     time += 1;
                 } else {
                     // Simply skip to the next activation instant.
@@ -311,12 +315,12 @@ mod tests {
     use super::{task::TaskProps, Simulator, SimulatorTask};
 
     fn assert_events_eq(events: Vec<SimulatorEvent>, expected: Vec<SimulatorEvent>) {
-        let events_with_stripped_start = events
+        let events_with_stripped_start_end = events
             .iter()
-            .filter(|e| !matches!(e, SimulatorEvent::Start(_, _)))
+            .filter(|e| !matches!(e, SimulatorEvent::Start(_, _) | SimulatorEvent::End(_, _)))
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(events_with_stripped_start, expected);
+        assert_eq!(events_with_stripped_start_end, expected);
     }
 
     #[test]

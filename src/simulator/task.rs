@@ -34,12 +34,7 @@ impl Task {
         source: &mut Xorshift128Plus,
     ) -> TimeUnit {
         let dist = Triangular::new(bcet as f64, wcet as f64, acet as f64);
-        let time = dist.sample(source) as TimeUnit;
-        println!(
-            "sampled time: {}; bcet: {}, acet: {}, wcet: {}",
-            time, bcet, acet, wcet
-        );
-        time
+        dist.sample(source) as TimeUnit
     }
 }
 
