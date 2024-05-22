@@ -269,6 +269,7 @@ impl SimulatorAgent {
                 .sum::<f64>()
                 + self.buffered_reward.unwrap_or(0.0);
             self.cumulative_reward += reward;
+            println!("Cumulative reward: {}", self.cumulative_reward);
             self.last_processed_event = self.events_history.len();
             self.reward_history.push(reward as f32);
 
@@ -336,6 +337,13 @@ impl SimulatorAgent {
 
     pub fn quit_training(&mut self) {
         self.stage = SimulatorAgentStage::Reactive;
+        self.cumulative_reward = 0.0;
+        self.events_history.clear();
+    }
+
+    pub fn placebo_mode(&mut self) {
+        self.stage = SimulatorAgentStage::Placebo;
+        self.cumulative_reward = 0.0;
         self.events_history.clear();
     }
 

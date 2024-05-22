@@ -2,7 +2,7 @@ use probability::source;
 
 use self::task::{SimulatorTask, Task, TaskId, TimeUnit};
 use crate::agent::SimulatorAgent;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, thread::sleep};
 
 pub mod task;
 pub mod validation;
@@ -70,6 +70,7 @@ impl Simulator {
         let mut current_mode = SimulatorMode::LMode;
         let mut current_running_jobs = Vec::<SimulatorJob>::new();
         let mut random_source = source::default(42);
+        let mut time_offset = 0;
 
         // Prepare the first start events.
         let mut task_start_events = self
@@ -88,7 +89,13 @@ impl Simulator {
 
         // Run the simulation.
         let mut time = 0;
+        let mut prev_time = TimeUnit::MAX;
         while time < duration {
+            if time == prev_time {
+                panic!("Simulation is stuck at instant {}", time);
+            }
+            prev_time = time;
+
             // Determine tasks starting now, according to the current mode
             let new_jobs = task_start_events
                 .iter()
@@ -122,7 +129,6 @@ impl Simulator {
                 })
                 .collect::<Vec<_>>();
 
-            // Add new jobs to current jobs
             current_running_jobs.extend(new_jobs);
             current_running_jobs.sort_by(|a, b| a.task(self).priority.cmp(&b.task(self).priority));
 
@@ -135,7 +141,10 @@ impl Simulator {
                     .count()
                     > 1
                 {
-                    println!("Multiple jobs of the same task; the system is not schedulable.");
+                    println!(
+                        "Multiple jobs of the same task at instant {}; the system is not schedulable: {:?}.",
+                        time, current_running_jobs
+                    );
                     return (None, simulator_events_history);
                 }
             }
@@ -250,18 +259,17 @@ impl Simulator {
                     }
                 }
 
-                // Go to the next instant.
                 time += 1;
             } else {
                 // No task is running. We can run the agent.
                 // This will trigger event processing
                 // and tasks props changes.
-                println!("No task is running.");
 
                 if self.agent.is_some() {
-                    println!("Agent is running.");
                     let agent = self.agent.take().unwrap();
+                    println!("Agent is running. instant={}", time);
                     agent.borrow_mut().activate(self);
+                    sleep(std::time::Duration::from_millis(100));
                     self.agent = Some(agent);
                 }
 
@@ -283,23 +291,23 @@ impl Simulator {
 
                 if RETURN_FULL_HISTORY {
                     run_history.push(None);
-                }
-
-                if RETURN_FULL_HISTORY {
                     time += 1;
                 } else {
-                    // Simply skip to the next activation instant.
-                    let new_time = task_start_events
-                                .iter()
-                                .filter(|event| matches!(event, SimulatorEvent::Start(_, instant) if *instant > time))
-                                .map(|event| match event {
-                                    SimulatorEvent::Start(_, instant) => *instant,
-                                    _ => unreachable!(),
-                                })
-                                .min()
-                                .unwrap();
-                    time = new_time;
-                    println!("Skipping to instant {}", time);
+                    let next_start_event = task_start_events
+                        .iter()
+                        .filter(|e| match e {
+                            SimulatorEvent::Start(_, instant) => *instant > time,
+                            _ => unreachable!(),
+                        })
+                        .min_by_key(|e| match e {
+                            SimulatorEvent::Start(_, instant) => *instant,
+                            _ => unreachable!(),
+                        });
+                    time = match next_start_event {
+                        Some(SimulatorEvent::Start(_, instant)) => *instant,
+                        _ => time,
+                    };
+                    println!("No task is running. Skipping to instant {}", time);
                 }
             }
         }

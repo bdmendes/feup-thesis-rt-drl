@@ -6,7 +6,7 @@ use agent::{
 };
 use generator::generate_tasks;
 use simulator::Simulator;
-use std::{cell::RefCell, io::Write, rc::Rc, thread::sleep};
+use std::{cell::RefCell, io::Write, rc::Rc};
 
 pub mod agent;
 pub mod generator;
@@ -14,14 +14,14 @@ pub mod ml;
 pub mod simulator;
 
 fn main() {
-    let tasks = generate_tasks(0.2, 6, 15);
+    let instants: u64 = 300_000_000;
+    let tasks = generate_tasks(0.2, 20, 10);
     let tasks_cpy = tasks.clone();
+    let tasks_cpy_2 = tasks.clone();
 
     for task in &tasks {
         println!("{:?}", task);
     }
-
-    sleep(std::time::Duration::from_secs(3));
 
     assert!(feasible_schedule_design_time(&tasks));
 
@@ -44,12 +44,12 @@ fn main() {
         agent: Some(agent.clone()),
     };
 
-    simulator.run::<false>(10_000_000_000);
+    simulator.run::<false>(instants);
 
     println!("Cumulative reward: {}", agent.borrow().cumulative_reward());
 
     // write cum reward to file
-    let mut file = std::fs::File::create("cum_reward.txt").unwrap();
+    let mut file = std::fs::File::create("out/reward.txt").unwrap();
     file.write_all(agent.borrow().cumulative_reward().to_string().as_bytes())
         .unwrap();
 
@@ -61,12 +61,32 @@ fn main() {
         agent: Some(agent.clone()),
     };
 
-    simulator.run::<true>(1_000_000_000);
+    simulator.run::<false>(instants);
+
+    println!(
+        "Cumulative reward 2: {}",
+        agent.borrow().cumulative_reward()
+    );
+
+    // write cum reward to file
+    let mut file = std::fs::File::create("out/reward2.txt").unwrap();
+    file.write_all(agent.borrow().cumulative_reward().to_string().as_bytes())
+        .unwrap();
+
+    agent.borrow_mut().placebo_mode();
+
+    let mut simulator = Simulator {
+        tasks: tasks_cpy_2,
+        random_execution_time: true,
+        agent: Some(agent.clone()),
+    };
+
+    simulator.run::<false>(instants);
 
     println!("Cumulative reward: {}", agent.borrow().cumulative_reward());
 
     // write cum reward to file
-    let mut file = std::fs::File::create("cum_reward2.txt").unwrap();
+    let mut file = std::fs::File::create("out/reward3.txt").unwrap();
     file.write_all(agent.borrow().cumulative_reward().to_string().as_bytes())
         .unwrap();
 }
