@@ -70,7 +70,6 @@ impl Simulator {
         let mut current_mode = SimulatorMode::LMode;
         let mut current_running_jobs = Vec::<SimulatorJob>::new();
         let mut random_source = source::default(42);
-        let mut time_offset = 0;
 
         // Prepare the first start events.
         let mut task_start_events = self

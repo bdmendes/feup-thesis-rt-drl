@@ -1,5 +1,3 @@
-use std::thread::sleep;
-
 use self::dqn::{Policy, ReplayMemory};
 use crate::agent::dqn::Transition;
 use crate::ml::tensor::{mean_squared_error, TensorStorage};
@@ -19,7 +17,6 @@ pub const DEFAULT_GAMMA: f32 = 0.99;
 pub const DEFAULT_UPDATE_FREQ: usize = 10;
 pub const DEFAULT_LEARNING_RATE: f32 = 0.00005;
 pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 8;
-pub const DEFAULT_HIDDEN_SIZE: usize = 128;
 
 #[derive(Debug)]
 pub enum SimulatorAction {
@@ -161,7 +158,7 @@ impl SimulatorAgent {
         gamma: f32,
         update_freq: usize,
         learning_rate: f32,
-        hidden_size: usize,
+        hidden_sizes: Vec<usize>,
         sample_batch_size: usize,
         activation: dqn::ActivationFunction,
         number_of_actions: usize,
@@ -173,7 +170,7 @@ impl SimulatorAgent {
             &mut memory_policy,
             number_of_features,
             number_of_actions,
-            hidden_size,
+            hidden_sizes.clone(),
             activation,
         );
         let mut memory_target = TensorStorage::default();
@@ -181,7 +178,7 @@ impl SimulatorAgent {
             &mut memory_target,
             number_of_features,
             number_of_actions,
-            hidden_size,
+            hidden_sizes,
             activation,
         );
         memory_target.copy(&memory_policy);

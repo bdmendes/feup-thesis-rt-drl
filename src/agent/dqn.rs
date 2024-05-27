@@ -13,8 +13,7 @@ pub enum ActivationFunction {
 }
 
 pub struct Policy {
-    l1: LinearLayer,
-    l2: LinearLayer,
+    layers: Vec<LinearLayer>,
     activation: ActivationFunction,
 }
 
@@ -23,24 +22,52 @@ impl Policy {
         storage: &mut TensorStorage,
         number_features: usize,
         number_actions: usize,
-        hidden_size: usize,
+        hidden_sizes: Vec<usize>,
         activation: ActivationFunction,
     ) -> Policy {
-        let l1 = LinearLayer::new(storage, number_features as i64, hidden_size as i64);
-        let l2 = LinearLayer::new(storage, hidden_size as i64, number_actions as i64);
-        Self { l1, l2, activation }
+        assert!(!hidden_sizes.is_empty());
+        let mut layers = Vec::new();
+
+        for (i, size) in hidden_sizes.iter().enumerate() {
+            let input_size = if i == 0 {
+                number_features
+            } else {
+                hidden_sizes[i - 1]
+            };
+            let output_size = *size;
+            layers.push(LinearLayer::new(
+                storage,
+                input_size as i64,
+                output_size as i64,
+            ));
+        }
+
+        layers.push(LinearLayer::new(
+            storage,
+            hidden_sizes[hidden_sizes.len() - 1] as i64,
+            number_actions as i64,
+        ));
+
+        Self { layers, activation }
     }
 }
 
 impl ComputeModel for Policy {
     fn forward(&self, storage: &TensorStorage, input: &Tensor) -> Tensor {
-        let mut o = self.l1.forward(storage, input);
-        o = match self.activation {
-            ActivationFunction::Tanh => o.tanh(),
-            ActivationFunction::ReLU => o.relu(),
-            ActivationFunction::Sigmoid => o.sigmoid(),
-        };
-        o = self.l2.forward(storage, &o);
+        let mut o = self.layers.first().unwrap().forward(storage, input);
+
+        for i in 0..self.layers.len() - 1 {
+            if i > 0 {
+                o = self.layers[i].forward(storage, &o);
+            }
+            o = match self.activation {
+                ActivationFunction::Tanh => o.tanh(),
+                ActivationFunction::ReLU => o.relu(),
+                ActivationFunction::Sigmoid => o.sigmoid(),
+            };
+        }
+
+        o = self.layers.last().unwrap().forward(storage, &o);
         o
     }
 }

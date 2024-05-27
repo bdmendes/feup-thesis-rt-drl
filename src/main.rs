@@ -1,8 +1,7 @@
-use crate::simulator::{validation::feasible_schedule_design_time, SimulatorMode};
+use crate::simulator::validation::feasible_schedule_design_time;
 use agent::{
-    dqn::ActivationFunction, SimulatorAgent, DEFAULT_GAMMA, DEFAULT_HIDDEN_SIZE,
-    DEFAULT_LEARNING_RATE, DEFAULT_MEM_SIZE, DEFAULT_MIN_MEM_SIZE, DEFAULT_SAMPLE_BATCH_SIZE,
-    DEFAULT_UPDATE_FREQ,
+    dqn::ActivationFunction, SimulatorAgent, DEFAULT_GAMMA, DEFAULT_LEARNING_RATE,
+    DEFAULT_MEM_SIZE, DEFAULT_MIN_MEM_SIZE, DEFAULT_SAMPLE_BATCH_SIZE, DEFAULT_UPDATE_FREQ,
 };
 use generator::generate_tasks;
 use simulator::Simulator;
@@ -31,7 +30,7 @@ fn main() {
         DEFAULT_GAMMA,
         DEFAULT_UPDATE_FREQ,
         DEFAULT_LEARNING_RATE,
-        DEFAULT_HIDDEN_SIZE,
+        vec![tasks.len() * 2, tasks.len()],
         DEFAULT_SAMPLE_BATCH_SIZE,
         ActivationFunction::Sigmoid,
         SimulatorAgent::number_of_actions(&tasks),
