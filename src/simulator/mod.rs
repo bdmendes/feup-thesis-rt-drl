@@ -118,6 +118,7 @@ impl Simulator {
                                     task.bcet,
                                     task.task.props().wcet_h,
                                     &mut random_source,
+                                    crate::generator::TimeSampleDistribution::Pert,
                                 )
                             } else {
                                 task.acet

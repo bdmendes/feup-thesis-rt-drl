@@ -1,5 +1,7 @@
-use probability::distribution::{Sample, Triangular};
+use probability::distribution::{Pert, Sample, Triangular};
 use probability::source::Xorshift128Plus;
+
+use crate::generator::TimeSampleDistribution;
 
 use super::SimulatorMode;
 
@@ -32,9 +34,16 @@ impl Task {
         bcet: TimeUnit,
         wcet: TimeUnit,
         source: &mut Xorshift128Plus,
+        dist: TimeSampleDistribution,
     ) -> TimeUnit {
-        let dist = Triangular::new(bcet as f64, wcet as f64, acet as f64);
-        dist.sample(source) as TimeUnit
+        match dist {
+            TimeSampleDistribution::Triangular => {
+                Triangular::new(bcet as f64, wcet as f64, acet as f64).sample(source) as TimeUnit
+            }
+            TimeSampleDistribution::Pert => {
+                Pert::new(bcet as f64, acet as f64, wcet as f64).sample(source) as TimeUnit
+            }
+        }
     }
 }
 
@@ -53,6 +62,10 @@ impl TaskProps {
             SimulatorMode::LMode => self.wcet_l,
             SimulatorMode::HMode => self.wcet_h,
         }
+    }
+
+    pub fn utilization(&self) -> f64 {
+        self.wcet_h as f64 / self.period as f64
     }
 }
 
@@ -83,6 +96,40 @@ impl SimulatorTask {
             priority,
             acet,
             bcet: acet,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use probability::source;
+
+    #[test]
+    fn sample_time() {
+        let (bcet, acet, wcet) = (3, 10, 30);
+        let mut source = source::default(42);
+
+        for _ in 0..10000 {
+            let time = super::Task::sample_execution_time(
+                acet,
+                bcet,
+                wcet,
+                &mut source,
+                super::TimeSampleDistribution::Pert,
+            );
+            print!("{}, ", time);
+        }
+        println!("\n");
+
+        for _ in 0..10000 {
+            let time = super::Task::sample_execution_time(
+                acet,
+                bcet,
+                wcet,
+                &mut source,
+                super::TimeSampleDistribution::Triangular,
+            );
+            print!("{}, ", time);
         }
     }
 }
