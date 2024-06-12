@@ -120,6 +120,7 @@ pub struct SimulatorAgent {
     mode_changes_to_hmode: usize,
     mode_changes_to_lmode: usize,
     task_kills: usize,
+    task_starts: usize,
 
     // DQN parameters.
     sample_batch_size: usize,
@@ -206,6 +207,7 @@ impl SimulatorAgent {
             mode_changes_to_hmode: 0,
             mode_changes_to_lmode: 0,
             task_kills: 0,
+            task_starts: 0,
         }
     }
 
@@ -215,6 +217,10 @@ impl SimulatorAgent {
 
     pub fn task_kills(&self) -> usize {
         self.task_kills
+    }
+
+    pub fn task_starts(&self) -> usize {
+        self.task_starts
     }
 
     pub fn mode_changes_to_hmode(&self) -> usize {
@@ -295,6 +301,11 @@ impl SimulatorAgent {
                 .iter()
                 .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::LMode, _)))
                 .count();
+            self.task_starts += self
+                .events_history
+                .iter()
+                .filter(|e| matches!(e, SimulatorEvent::Start(_, _)))
+                .count();
             self.events_history.clear();
             self.cumulative_reward += reward;
             println!("Cumulative reward: {}", self.cumulative_reward);
@@ -366,6 +377,7 @@ impl SimulatorAgent {
         self.stage = SimulatorAgentStage::Reactive;
         self.cumulative_reward = 0.0;
         self.task_kills = 0;
+        self.task_starts = 0;
         self.mode_changes_to_hmode = 0;
         self.mode_changes_to_lmode = 0;
         self.events_history.clear();
@@ -376,6 +388,7 @@ impl SimulatorAgent {
         self.stage = SimulatorAgentStage::Placebo;
         self.cumulative_reward = 0.0;
         self.task_kills = 0;
+        self.task_starts = 0;
         self.mode_changes_to_hmode = 0;
         self.mode_changes_to_lmode = 0;
         self.events_history.clear();

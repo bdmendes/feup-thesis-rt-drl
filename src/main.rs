@@ -5,7 +5,7 @@ use agent::{
 };
 use generator::generate_tasks;
 use simulator::Simulator;
-use std::{cell::RefCell, io::Write, rc::Rc, thread::sleep};
+use std::{cell::RefCell, io::Write, rc::Rc};
 
 pub mod agent;
 pub mod generator;
@@ -13,18 +13,12 @@ pub mod ml;
 pub mod simulator;
 
 fn run_in_3modes() {
-    // clear out directory
-    std::fs::remove_dir_all("out").unwrap_or(());
-
-    // create out directory
-    std::fs::create_dir("out").unwrap();
-
     let instants: u64 = 300_000_000; // 3 seconds
 
     #[allow(unused_assignments)]
     let mut tasks = Vec::new();
     loop {
-        tasks = generate_tasks(0.7, 50, generator::TimeSampleDistribution::Pert);
+        tasks = generate_tasks(0.7, 100, generator::TimeSampleDistribution::Pert);
         for task in &tasks {
             println!("{:?} {}", task, task.task.props().utilization());
         }
@@ -53,69 +47,76 @@ fn run_in_3modes() {
     )));
 
     ////////// Training //////////
-    let mut simulator = Simulator {
-        tasks,
-        random_execution_time: true,
-        agent: Some(agent.clone()),
-        elapsed_times: vec![],
-    };
-    simulator.run::<false>(instants);
-    let contents = format!(
-        "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}",
-        agent.borrow().cumulative_reward(),
-        agent.borrow().mode_changes_to_hmode(),
-        agent.borrow().mode_changes_to_lmode(),
-        agent.borrow().task_kills()
-    );
-    let mut file = std::fs::File::create("out/reward.txt").unwrap();
-    file.write_all(contents.as_bytes()).unwrap();
+    {
+        let mut simulator = Simulator {
+            tasks,
+            random_execution_time: true,
+            agent: Some(agent.clone()),
+            elapsed_times: vec![],
+        };
+        simulator.run::<false>(instants);
+        let contents = format!(
+            "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}, task starts: {}",
+            agent.borrow().cumulative_reward(),
+            agent.borrow().mode_changes_to_hmode(),
+            agent.borrow().mode_changes_to_lmode(),
+            agent.borrow().task_kills(),
+            agent.borrow().task_starts()
+        );
+        let mut file = std::fs::File::create("out/reward.txt").unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+    }
 
     ////////// Reactive //////////
-    println!("QUIT TRAINING");
-    sleep(std::time::Duration::from_secs(10));
-    agent.borrow_mut().quit_training();
-    let mut simulator = Simulator {
-        tasks: tasks_cpy,
-        random_execution_time: true,
-        agent: Some(agent.clone()),
-        elapsed_times: vec![],
-    };
-    simulator.run::<false>(instants);
-    let contents = format!(
-        "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}",
-        agent.borrow().cumulative_reward(),
-        agent.borrow().mode_changes_to_hmode(),
-        agent.borrow().mode_changes_to_lmode(),
-        agent.borrow().task_kills()
-    );
-    let mut file = std::fs::File::create("out/reward2.txt").unwrap();
-    file.write_all(contents.as_bytes()).unwrap();
-    let mut times_file = std::fs::File::create("out/times.txt").unwrap();
-    for time in simulator.elapsed_times.iter() {
-        times_file
-            .write_all(format!("{}\n", time.as_nanos()).as_bytes())
-            .unwrap();
+    {
+        agent.borrow_mut().quit_training();
+        let mut simulator = Simulator {
+            tasks: tasks_cpy,
+            random_execution_time: true,
+            agent: Some(agent.clone()),
+            elapsed_times: vec![],
+        };
+        simulator.run::<false>(instants);
+        let contents = format!(
+            "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}, task starts: {}",
+            agent.borrow().cumulative_reward(),
+            agent.borrow().mode_changes_to_hmode(),
+            agent.borrow().mode_changes_to_lmode(),
+            agent.borrow().task_kills(),
+            agent.borrow().task_starts()
+        );
+        let mut file = std::fs::File::create("out/reward2.txt").unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+        let mut times_file = std::fs::File::create("out/times.txt").unwrap();
+        for time in simulator.elapsed_times.iter() {
+            times_file
+                .write_all(format!("{}\n", time.as_nanos()).as_bytes())
+                .unwrap();
+        }
     }
 
     ////////// Placebo //////////
-    agent.borrow_mut().placebo_mode();
-    let mut simulator = Simulator {
-        tasks: tasks_cpy_2,
-        random_execution_time: true,
-        agent: Some(agent.clone()),
-        elapsed_times: vec![],
-    };
+    {
+        agent.borrow_mut().placebo_mode();
+        let mut simulator = Simulator {
+            tasks: tasks_cpy_2,
+            random_execution_time: true,
+            agent: Some(agent.clone()),
+            elapsed_times: vec![],
+        };
 
-    simulator.run::<false>(instants);
-    let contents = format!(
-        "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}",
-        agent.borrow().cumulative_reward(),
-        agent.borrow().mode_changes_to_hmode(),
-        agent.borrow().mode_changes_to_lmode(),
-        agent.borrow().task_kills()
-    );
-    let mut file = std::fs::File::create("out/reward3.txt").unwrap();
-    file.write_all(contents.as_bytes()).unwrap();
+        simulator.run::<false>(instants);
+        let contents = format!(
+            "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}, task starts: {}",
+            agent.borrow().cumulative_reward(),
+            agent.borrow().mode_changes_to_hmode(),
+            agent.borrow().mode_changes_to_lmode(),
+            agent.borrow().task_kills(),
+            agent.borrow().task_starts()
+        );
+        let mut file = std::fs::File::create("out/reward3.txt").unwrap();
+        file.write_all(contents.as_bytes()).unwrap();
+    }
 }
 
 fn main() {
