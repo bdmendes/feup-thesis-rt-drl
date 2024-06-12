@@ -116,8 +116,10 @@ enum SimulatorAgentStage {
 pub struct SimulatorAgent {
     // The agent is informed periodically about the state of the simulator.
     events_history: Vec<SimulatorEvent>,
-    last_processed_event: usize,
     cumulative_reward: f64,
+    mode_changes_to_hmode: usize,
+    mode_changes_to_lmode: usize,
+    task_kills: usize,
 
     // DQN parameters.
     sample_batch_size: usize,
@@ -185,7 +187,6 @@ impl SimulatorAgent {
 
         Self {
             events_history: Vec::new(),
-            last_processed_event: 0,
             cumulative_reward: 0.0,
             gamma,
             update_freq,
@@ -202,11 +203,26 @@ impl SimulatorAgent {
             buffered_action: None,
             buffered_state: None,
             buffered_reward: None,
+            mode_changes_to_hmode: 0,
+            mode_changes_to_lmode: 0,
+            task_kills: 0,
         }
     }
 
     pub fn cumulative_reward(&self) -> f64 {
         self.cumulative_reward
+    }
+
+    pub fn task_kills(&self) -> usize {
+        self.task_kills
+    }
+
+    pub fn mode_changes_to_hmode(&self) -> usize {
+        self.mode_changes_to_hmode
+    }
+
+    pub fn mode_changes_to_lmode(&self) -> usize {
+        self.mode_changes_to_lmode
     }
 
     pub fn push_event(&mut self, event: SimulatorEvent) {
@@ -261,13 +277,27 @@ impl SimulatorAgent {
             let reward = self
                 .events_history
                 .iter()
-                .skip(self.last_processed_event)
                 .map(|e| Self::event_to_reward(e, simulator))
                 .sum::<f64>()
                 + self.buffered_reward.unwrap_or(0.0);
+            self.task_kills += self
+                .events_history
+                .iter()
+                .filter(|e| matches!(e, SimulatorEvent::TaskKill(_, _)))
+                .count();
+            self.mode_changes_to_hmode += self
+                .events_history
+                .iter()
+                .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::HMode, _)))
+                .count();
+            self.mode_changes_to_lmode += self
+                .events_history
+                .iter()
+                .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::LMode, _)))
+                .count();
+            self.events_history.clear();
             self.cumulative_reward += reward;
             println!("Cumulative reward: {}", self.cumulative_reward);
-            self.last_processed_event = self.events_history.len();
             self.reward_history.push(reward as f32);
 
             let transition = Transition::new(
@@ -335,12 +365,19 @@ impl SimulatorAgent {
     pub fn quit_training(&mut self) {
         self.stage = SimulatorAgentStage::Reactive;
         self.cumulative_reward = 0.0;
+        self.task_kills = 0;
+        self.mode_changes_to_hmode = 0;
+        self.mode_changes_to_lmode = 0;
         self.events_history.clear();
+        self.target_network.free(&mut self.memory_target);
     }
 
     pub fn placebo_mode(&mut self) {
         self.stage = SimulatorAgentStage::Placebo;
         self.cumulative_reward = 0.0;
+        self.task_kills = 0;
+        self.mode_changes_to_hmode = 0;
+        self.mode_changes_to_lmode = 0;
         self.events_history.clear();
     }
 

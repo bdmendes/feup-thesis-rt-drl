@@ -12,9 +12,11 @@ pub enum ActivationFunction {
     Sigmoid,
 }
 
+#[derive(Debug)]
 pub struct Policy {
     layers: Vec<LinearLayer>,
     activation: ActivationFunction,
+    freed: bool,
 }
 
 impl Policy {
@@ -48,12 +50,25 @@ impl Policy {
             number_actions as i64,
         ));
 
-        Self { layers, activation }
+        Self {
+            layers,
+            activation,
+            freed: false,
+        }
+    }
+
+    pub fn free(&mut self, storage: &mut TensorStorage) {
+        self.layers.iter().for_each(|l| {
+            storage.free_at(*l.params.get(&"W".to_string()).unwrap());
+            storage.free_at(*l.params.get(&"b".to_string()).unwrap());
+        });
+        self.freed = true;
     }
 }
 
 impl ComputeModel for Policy {
     fn forward(&self, storage: &TensorStorage, input: &Tensor) -> Tensor {
+        assert!(!self.freed);
         let mut o = self.layers.first().unwrap().forward(storage, input);
 
         for i in 0..self.layers.len() - 1 {
@@ -141,5 +156,33 @@ impl ReplayMemory {
             Tensor::from_slice(rewards.as_slice()).unsqueeze(1),
             Tensor::stack(&states_, 0),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Policy;
+
+    #[test]
+    fn new_policy() {
+        let storage = &mut crate::ml::tensor::TensorStorage::default();
+        let policy = Policy::new(
+            storage,
+            4,
+            13,
+            vec![16, 8],
+            crate::agent::dqn::ActivationFunction::ReLU,
+        );
+
+        assert!(policy.layers.len() == 3);
+
+        assert!(policy.layers[0].weights(storage).size() == [4, 16]);
+        assert!(policy.layers[0].bias(storage).size() == [1, 16]);
+
+        assert!(policy.layers[1].weights(storage).size() == [16, 8]);
+        assert!(policy.layers[1].bias(storage).size() == [1, 8]);
+
+        assert!(policy.layers[2].weights(storage).size() == [8, 13]);
+        assert!(policy.layers[2].bias(storage).size() == [1, 13]);
     }
 }

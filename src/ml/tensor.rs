@@ -36,7 +36,7 @@ impl TensorStorage {
         self.values.len()
     }
 
-    pub fn push_tensor(&mut self, value: Tensor) -> usize {
+    fn push_tensor(&mut self, value: Tensor) -> usize {
         self.values.push(value);
         self.values.len() - 1
     }
@@ -44,6 +44,10 @@ impl TensorStorage {
     pub fn push(&mut self, size: &[i64], requires_grad: bool) -> usize {
         let t = Tensor::randn(size, (Kind::Float, DEVICE)).requires_grad_(requires_grad);
         self.push_tensor(t)
+    }
+
+    pub fn free_at(&mut self, index: usize) {
+        self.values[index] = Tensor::new();
     }
 
     pub fn get(&self, index: usize) -> &Tensor {

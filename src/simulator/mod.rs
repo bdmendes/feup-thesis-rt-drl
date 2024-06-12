@@ -2,7 +2,7 @@ use probability::source;
 
 use self::task::{SimulatorTask, Task, TaskId, TimeUnit};
 use crate::agent::SimulatorAgent;
-use std::{cell::RefCell, rc::Rc, thread::sleep};
+use std::{cell::RefCell, rc::Rc, time};
 
 pub mod task;
 pub mod validation;
@@ -58,6 +58,7 @@ pub struct Simulator {
     pub tasks: Vec<SimulatorTask>,
     pub random_execution_time: bool,
     pub agent: Option<Rc<RefCell<SimulatorAgent>>>,
+    pub elapsed_times: Vec<time::Duration>,
 }
 
 impl Simulator {
@@ -168,8 +169,10 @@ impl Simulator {
                     *this_task_start_event =
                         SimulatorEvent::Start(job.task(self).task.props().id, new_instant);
 
-                    simulator_events_history
-                        .push(SimulatorEvent::Start(job.task(self).task.props().id, time));
+                    if RETURN_FULL_HISTORY {
+                        simulator_events_history
+                            .push(SimulatorEvent::Start(job.task(self).task.props().id, time));
+                    }
 
                     if self.agent.is_some() {
                         // Signal task start to agent.
@@ -194,8 +197,10 @@ impl Simulator {
                         .retain(|j| j.task(self).task.props().id != job.task(self).task.props().id);
 
                     // Push task end.
-                    simulator_events_history
-                        .push(SimulatorEvent::End(job.task(self).task.props().id, time));
+                    if RETURN_FULL_HISTORY {
+                        simulator_events_history
+                            .push(SimulatorEvent::End(job.task(self).task.props().id, time));
+                    }
 
                     // Signal task end to agent.
                     if self.agent.is_some() {
@@ -226,8 +231,10 @@ impl Simulator {
                         current_running_jobs
                             .retain(|job| matches!(job.task(self).task, Task::HTask(_)));
 
-                        simulator_events_history
-                            .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
+                        if RETURN_FULL_HISTORY {
+                            simulator_events_history
+                                .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
+                        }
 
                         // Inform the agent of the mode change.
                         if self.agent.is_some() {
@@ -245,10 +252,12 @@ impl Simulator {
                             j.task(self).task.props().id != job.task(self).task.props().id
                         });
 
-                        simulator_events_history.push(SimulatorEvent::TaskKill(
-                            job.task(self).task.props().id,
-                            time,
-                        ));
+                        if RETURN_FULL_HISTORY {
+                            simulator_events_history.push(SimulatorEvent::TaskKill(
+                                job.task(self).task.props().id,
+                                time,
+                            ));
+                        }
 
                         if self.agent.is_some() {
                             // Inform the agent of the task kill.
@@ -268,16 +277,20 @@ impl Simulator {
                 if self.agent.is_some() {
                     let agent = self.agent.take().unwrap();
                     println!("Agent is running. instant={}", time);
+                    let time = time::Instant::now();
                     agent.borrow_mut().activate(self);
-                    sleep(std::time::Duration::from_millis(100));
+                    let elapsed = time.elapsed();
+                    self.elapsed_times.push(elapsed);
                     self.agent = Some(agent);
                 }
 
                 if current_mode != SimulatorMode::LMode {
                     current_mode = SimulatorMode::LMode;
 
-                    simulator_events_history
-                        .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
+                    if RETURN_FULL_HISTORY {
+                        simulator_events_history
+                            .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
+                    }
 
                     if self.agent.is_some() {
                         // Inform the agent of the mode change.
@@ -361,6 +374,7 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -424,6 +438,7 @@ mod tests {
             tasks: vec![task1, task2, task3],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -475,6 +490,7 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(8);
 
@@ -524,6 +540,7 @@ mod tests {
             tasks: vec![task1.clone(), task2.clone()],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(12);
 
@@ -584,6 +601,7 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(12);
 
@@ -646,6 +664,7 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -682,6 +701,7 @@ mod tests {
             tasks: vec![task1, task2],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -712,6 +732,7 @@ mod tests {
             tasks: vec![task1],
             random_execution_time: false,
             agent: None,
+            elapsed_times: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 

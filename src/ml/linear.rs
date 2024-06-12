@@ -1,11 +1,10 @@
+use super::{tensor::TensorStorage, ComputeModel};
 use std::collections::HashMap;
-
 use tch::Tensor;
 
-use super::{tensor::TensorStorage, ComputeModel};
-
+#[derive(Debug)]
 pub struct LinearLayer {
-    params: HashMap<String, usize>,
+    pub params: HashMap<String, usize>,
 }
 
 impl LinearLayer {
@@ -14,6 +13,14 @@ impl LinearLayer {
         p.insert("W".to_string(), mem.push(&[ninputs, noutputs], true));
         p.insert("b".to_string(), mem.push(&[1, noutputs], true));
         Self { params: p }
+    }
+
+    pub fn weights<'a>(&self, mem: &'a TensorStorage) -> &'a Tensor {
+        mem.get(*self.params.get(&"W".to_string()).unwrap())
+    }
+
+    pub fn bias<'a>(&self, mem: &'a TensorStorage) -> &'a Tensor {
+        mem.get(*self.params.get(&"b".to_string()).unwrap())
     }
 }
 
