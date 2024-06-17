@@ -3,35 +3,176 @@ use agent::{
     dqn::ActivationFunction, SimulatorAgent, DEFAULT_GAMMA, DEFAULT_LEARNING_RATE,
     DEFAULT_MEM_SIZE, DEFAULT_MIN_MEM_SIZE, DEFAULT_SAMPLE_BATCH_SIZE, DEFAULT_UPDATE_FREQ,
 };
-use generator::generate_tasks;
-use simulator::Simulator;
-use std::{cell::RefCell, io::Write, rc::Rc};
+use generator::{generate_tasks, Runnable};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use simulator::{task::SimulatorTask, Simulator};
+use std::{
+    cell::RefCell,
+    io::Write,
+    rc::Rc,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
 pub mod agent;
 pub mod generator;
 pub mod ml;
 pub mod simulator;
 
-fn run_in_3modes() {
-    let instants: u64 = 300_000_000; // 3 seconds
+fn bad_events(agent: &SimulatorAgent) -> f64 {
+    0.6 * (agent.mode_changes_to_hmode() as f64) + 0.4 * (agent.task_kills() as f64)
+}
 
-    #[allow(unused_assignments)]
-    let mut tasks = Vec::new();
-    loop {
-        tasks = generate_tasks(0.7, 100, generator::TimeSampleDistribution::Pert);
-        for task in &tasks {
-            println!("{:?} {}", task, task.task.props().utilization());
+fn write_result(agent: &SimulatorAgent, file: &mut std::fs::File) {
+    let contents = format!(
+        "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}, task starts: {}",
+        agent.cumulative_reward(),
+        agent.mode_changes_to_hmode(),
+        agent.mode_changes_to_lmode(),
+        agent.task_kills(),
+        agent.task_starts()
+    );
+    file.write_all(contents.as_bytes()).unwrap();
+}
+
+fn tune(tasks: Vec<SimulatorTask>) {
+    let train_instants: u64 = Runnable::duration_to_time_unit(Duration::from_secs(10));
+    let test_instants: u64 = Runnable::duration_to_time_unit(Duration::from_secs(2));
+
+    let hyper_events = Arc::new(Mutex::new(vec![]));
+    let mut hyper_iteration = 0;
+
+    {
+        ////////// Placebo //////////
+        let agent = Rc::new(RefCell::new(SimulatorAgent::new(
+            DEFAULT_MEM_SIZE,
+            DEFAULT_MIN_MEM_SIZE,
+            DEFAULT_GAMMA,
+            DEFAULT_UPDATE_FREQ,
+            DEFAULT_LEARNING_RATE,
+            vec![8],
+            DEFAULT_SAMPLE_BATCH_SIZE,
+            ActivationFunction::Sigmoid,
+            SimulatorAgent::number_of_actions(&tasks),
+            SimulatorAgent::number_of_features(&tasks),
+        )));
+        agent.borrow_mut().placebo_mode();
+        let mut simulator = Simulator {
+            tasks: tasks.clone(),
+            random_execution_time: true,
+            agent: Some(agent.clone()),
+            elapsed_times: vec![],
+        };
+
+        simulator.run::<false>(test_instants);
+        let mut file = std::fs::File::create("out/placebo.txt").unwrap();
+        write_result(&agent.borrow(), &mut file);
+    }
+
+    // Hyperparameter tuning: train and test
+    let hidden_sizes_set = [
+        vec![tasks.len() / 2],
+        vec![tasks.len(), tasks.len() / 2],
+        vec![tasks.len(), tasks.len() / 2, tasks.len() / 4],
+    ];
+    thread::scope(|scope| {
+        for update_freq in [
+            DEFAULT_UPDATE_FREQ,
+            DEFAULT_UPDATE_FREQ * 2,
+            DEFAULT_UPDATE_FREQ * 4,
+        ] {
+            for sample_batch_size in [
+                DEFAULT_SAMPLE_BATCH_SIZE,
+                DEFAULT_SAMPLE_BATCH_SIZE / 2,
+                DEFAULT_SAMPLE_BATCH_SIZE * 2,
+            ] {
+                for hidden_sizes in &hidden_sizes_set {
+                    for activation_function in [
+                        ActivationFunction::Sigmoid,
+                        ActivationFunction::ReLU,
+                        ActivationFunction::Tanh,
+                    ] {
+                        hyper_iteration += 1;
+                        let tasks = tasks.clone();
+                        let hyper_events = hyper_events.clone();
+                        let number_of_actions = SimulatorAgent::number_of_actions(&tasks);
+                        let number_of_features = SimulatorAgent::number_of_features(&tasks);
+
+                        scope.spawn(move || {
+                            let agent = Rc::new(RefCell::new(SimulatorAgent::new(
+                                DEFAULT_MEM_SIZE,
+                                DEFAULT_MIN_MEM_SIZE,
+                                DEFAULT_GAMMA,
+                                update_freq,
+                                DEFAULT_LEARNING_RATE,
+                                hidden_sizes.clone(),
+                                sample_batch_size,
+                                activation_function,
+                                number_of_actions,
+                                number_of_features,
+                            )));
+
+                            ////////// Training //////////
+                            {
+                                let mut simulator = Simulator {
+                                    tasks: tasks.clone(),
+                                    random_execution_time: true,
+                                    agent: Some(agent.clone()),
+                                    elapsed_times: vec![],
+                                };
+                                simulator.run::<false>(train_instants);
+                            }
+
+                            ////////// Testing //////////
+                            {
+                                agent.borrow_mut().quit_training();
+                                let mut simulator = Simulator {
+                                    tasks: tasks.clone(),
+                                    random_execution_time: true,
+                                    agent: Some(agent.clone()),
+                                    elapsed_times: vec![],
+                                };
+                                simulator.run::<false>(test_instants);
+                                let mut file = std::fs::File::create(format!(
+                                    "out/test_{hyper_iteration}.txt"
+                                ))
+                                .unwrap();
+                                write_result(&agent.borrow(), &mut file);
+                                hyper_events.lock().unwrap().push((
+                                    bad_events(&agent.borrow()),
+                                    update_freq,
+                                    sample_batch_size,
+                                    hidden_sizes.clone(),
+                                    activation_function,
+                                ));
+                            }
+                        });
+                    }
+                }
+            }
         }
+    });
+}
 
-        if !feasible_schedule_design_time(&tasks) {
-            println!("Not feasible");
+fn generate_sets(size: usize, number_runnables: usize) -> Vec<Vec<SimulatorTask>> {
+    let mut task_sets = vec![];
+    while task_sets.len() < size {
+        let set = generate_tasks(
+            0.7,
+            number_runnables,
+            generator::TimeSampleDistribution::Pert,
+        );
+        if !feasible_schedule_design_time(&set) {
             continue;
         }
-
-        break;
+        task_sets.push(set);
     }
-    let tasks_cpy = tasks.clone();
-    let tasks_cpy_2 = tasks.clone();
+    task_sets
+}
+
+fn simulate_placebo(tasks: Vec<SimulatorTask>, secs: usize) -> (usize, usize) {
+    let test_instants: u64 = Runnable::duration_to_time_unit(Duration::from_secs(secs as u64));
 
     let agent = Rc::new(RefCell::new(SimulatorAgent::new(
         DEFAULT_MEM_SIZE,
@@ -39,86 +180,76 @@ fn run_in_3modes() {
         DEFAULT_GAMMA,
         DEFAULT_UPDATE_FREQ,
         DEFAULT_LEARNING_RATE,
-        vec![tasks.len() * 2, tasks.len()],
+        vec![8],
         DEFAULT_SAMPLE_BATCH_SIZE,
         ActivationFunction::Sigmoid,
         SimulatorAgent::number_of_actions(&tasks),
         SimulatorAgent::number_of_features(&tasks),
     )));
+    agent.borrow_mut().placebo_mode();
+    let mut simulator = Simulator {
+        tasks: tasks.clone(),
+        random_execution_time: true,
+        agent: Some(agent.clone()),
+        elapsed_times: vec![],
+    };
 
-    ////////// Training //////////
-    {
-        let mut simulator = Simulator {
-            tasks,
-            random_execution_time: true,
-            agent: Some(agent.clone()),
-            elapsed_times: vec![],
-        };
-        simulator.run::<false>(instants);
-        let contents = format!(
-            "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}, task starts: {}",
-            agent.borrow().cumulative_reward(),
-            agent.borrow().mode_changes_to_hmode(),
-            agent.borrow().mode_changes_to_lmode(),
-            agent.borrow().task_kills(),
-            agent.borrow().task_starts()
-        );
-        let mut file = std::fs::File::create("out/reward.txt").unwrap();
-        file.write_all(contents.as_bytes()).unwrap();
+    simulator.run::<false>(test_instants);
+    let mode_changes_to_hmode = agent.borrow().mode_changes_to_hmode();
+    let task_kills = agent.borrow().task_kills();
+    (mode_changes_to_hmode, task_kills)
+}
+
+pub fn hp_tuning() {
+    std::fs::create_dir_all("out").unwrap();
+    let set = generate_sets(1, 25);
+    tune(set[0].clone());
+}
+
+pub fn placebo() {
+    std::fs::create_dir_all("out").unwrap();
+    let set_25 = generate_sets(50, 25);
+    let changes_kills_25 = set_25
+        .par_iter()
+        .map(|tasks| {
+            let (mode_changes_to_h, task_kills) = simulate_placebo(tasks.clone(), 1);
+            (mode_changes_to_h, task_kills)
+        })
+        .collect::<Vec<_>>();
+    let mut file_25 = std::fs::File::create("out/changes_kills_25.txt").unwrap();
+    for (mode_changes_to_h, task_kills) in changes_kills_25 {
+        file_25
+            .write_all(
+                format!(
+                    "Mode changes to H: {}; Task kills: {}\n",
+                    mode_changes_to_h, task_kills
+                )
+                .as_bytes(),
+            )
+            .unwrap();
     }
-
-    ////////// Reactive //////////
-    {
-        agent.borrow_mut().quit_training();
-        let mut simulator = Simulator {
-            tasks: tasks_cpy,
-            random_execution_time: true,
-            agent: Some(agent.clone()),
-            elapsed_times: vec![],
-        };
-        simulator.run::<false>(instants);
-        let contents = format!(
-            "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}, task starts: {}",
-            agent.borrow().cumulative_reward(),
-            agent.borrow().mode_changes_to_hmode(),
-            agent.borrow().mode_changes_to_lmode(),
-            agent.borrow().task_kills(),
-            agent.borrow().task_starts()
-        );
-        let mut file = std::fs::File::create("out/reward2.txt").unwrap();
-        file.write_all(contents.as_bytes()).unwrap();
-        let mut times_file = std::fs::File::create("out/times.txt").unwrap();
-        for time in simulator.elapsed_times.iter() {
-            times_file
-                .write_all(format!("{}\n", time.as_nanos()).as_bytes())
-                .unwrap();
-        }
-    }
-
-    ////////// Placebo //////////
-    {
-        agent.borrow_mut().placebo_mode();
-        let mut simulator = Simulator {
-            tasks: tasks_cpy_2,
-            random_execution_time: true,
-            agent: Some(agent.clone()),
-            elapsed_times: vec![],
-        };
-
-        simulator.run::<false>(instants);
-        let contents = format!(
-            "Cumulative reward: {}; mode changes to H: {}; mode changes to L: {}; task kills: {}, task starts: {}",
-            agent.borrow().cumulative_reward(),
-            agent.borrow().mode_changes_to_hmode(),
-            agent.borrow().mode_changes_to_lmode(),
-            agent.borrow().task_kills(),
-            agent.borrow().task_starts()
-        );
-        let mut file = std::fs::File::create("out/reward3.txt").unwrap();
-        file.write_all(contents.as_bytes()).unwrap();
+    let set_100 = generate_sets(50, 100);
+    let changes_kills_100 = set_100
+        .par_iter()
+        .map(|tasks| {
+            let (mode_changes_to_h, task_kills) = simulate_placebo(tasks.clone(), 1);
+            (mode_changes_to_h, task_kills)
+        })
+        .collect::<Vec<_>>();
+    let mut file_100 = std::fs::File::create("out/changes_kills_100.txt").unwrap();
+    for (mode_changes_to_h, task_kills) in changes_kills_100 {
+        file_100
+            .write_all(
+                format!(
+                    "Mode changes to H: {}; Task kills: {}\n",
+                    mode_changes_to_h, task_kills
+                )
+                .as_bytes(),
+            )
+            .unwrap();
     }
 }
 
 fn main() {
-    run_in_3modes();
+    hp_tuning();
 }

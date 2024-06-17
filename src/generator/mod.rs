@@ -94,7 +94,7 @@ pub enum TimeSampleDistribution {
 }
 
 #[derive(Clone)]
-struct Runnable {
+pub struct Runnable {
     // Given a runnable with a given period,
     // the average execution time depends on
     // the nature of the task.
@@ -157,7 +157,7 @@ impl Runnable {
         Uniform::new(self.acet as f64, self.wcet as f64).sample(source) as TimeUnit
     }
 
-    fn duration_to_time_unit(duration: Duration) -> TimeUnit {
+    pub fn duration_to_time_unit(duration: Duration) -> TimeUnit {
         // We'll represent a second as 100_000_000 units.
         // This allows us to represent us with a precision of 10^-2.
         (duration.as_secs_f64() * 100_000_000.0) as TimeUnit

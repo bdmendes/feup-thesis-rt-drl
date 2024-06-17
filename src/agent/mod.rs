@@ -12,11 +12,11 @@ use tch::Tensor;
 pub mod dqn;
 
 pub const DEFAULT_MEM_SIZE: usize = 200;
-pub const DEFAULT_MIN_MEM_SIZE: usize = 10;
+pub const DEFAULT_MIN_MEM_SIZE: usize = 20;
 pub const DEFAULT_GAMMA: f32 = 0.99;
-pub const DEFAULT_UPDATE_FREQ: usize = 10;
+pub const DEFAULT_UPDATE_FREQ: usize = 5;
 pub const DEFAULT_LEARNING_RATE: f32 = 0.00005;
-pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 8;
+pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 6;
 
 #[derive(Debug)]
 pub enum SimulatorAction {
@@ -121,6 +121,7 @@ pub struct SimulatorAgent {
     mode_changes_to_lmode: usize,
     task_kills: usize,
     task_starts: usize,
+    last_processed_event_index: usize,
 
     // DQN parameters.
     sample_batch_size: usize,
@@ -150,7 +151,6 @@ pub struct SimulatorAgent {
 
     buffered_action: Option<SimulatorAction>,
     buffered_state: Option<Tensor>,
-    buffered_reward: Option<f64>,
 }
 
 impl SimulatorAgent {
@@ -203,11 +203,11 @@ impl SimulatorAgent {
             reward_history: Vec::new(),
             buffered_action: None,
             buffered_state: None,
-            buffered_reward: None,
             mode_changes_to_hmode: 0,
             mode_changes_to_lmode: 0,
             task_kills: 0,
             task_starts: 0,
+            last_processed_event_index: 0,
         }
     }
 
@@ -269,48 +269,49 @@ impl SimulatorAgent {
                 println!("Invalid action {:?}, reverting.", action);
                 let reverse_action = action.reverse();
                 reverse_action.apply(&mut simulator.tasks);
-                self.buffered_reward = Some(-0.05);
             } else {
                 println!("Applied action {:?}", action);
-                self.buffered_reward = Some(0.05);
             }
-        } else {
-            self.buffered_reward = Some(0.0);
         }
+
+        // Track events.
+        self.task_kills += self
+            .events_history
+            .iter()
+            .skip(self.last_processed_event_index)
+            .filter(|e| matches!(e, SimulatorEvent::TaskKill(_, _)))
+            .count();
+        self.mode_changes_to_hmode += self
+            .events_history
+            .iter()
+            .skip(self.last_processed_event_index)
+            .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::HMode, _)))
+            .count();
+        self.mode_changes_to_lmode += self
+            .events_history
+            .iter()
+            .skip(self.last_processed_event_index)
+            .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::LMode, _)))
+            .count();
+        self.task_starts += self
+            .events_history
+            .iter()
+            .skip(self.last_processed_event_index)
+            .filter(|e| matches!(e, SimulatorEvent::Start(_, _)))
+            .count();
+        let reward = self
+            .events_history
+            .iter()
+            .skip(self.last_processed_event_index)
+            .map(|e| Self::event_to_reward(e, simulator))
+            .sum::<f64>();
+        self.cumulative_reward += reward;
+        println!("Cumulative reward: {}", self.cumulative_reward);
+        self.reward_history.push(reward as f32);
+        self.last_processed_event_index = self.events_history.len();
 
         if let Some(buffered_action) = &self.buffered_action {
             // We had taken an action previously, and are now receiving the reward.
-            let reward = self
-                .events_history
-                .iter()
-                .map(|e| Self::event_to_reward(e, simulator))
-                .sum::<f64>()
-                + self.buffered_reward.unwrap_or(0.0);
-            self.task_kills += self
-                .events_history
-                .iter()
-                .filter(|e| matches!(e, SimulatorEvent::TaskKill(_, _)))
-                .count();
-            self.mode_changes_to_hmode += self
-                .events_history
-                .iter()
-                .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::HMode, _)))
-                .count();
-            self.mode_changes_to_lmode += self
-                .events_history
-                .iter()
-                .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::LMode, _)))
-                .count();
-            self.task_starts += self
-                .events_history
-                .iter()
-                .filter(|e| matches!(e, SimulatorEvent::Start(_, _)))
-                .count();
-            self.events_history.clear();
-            self.cumulative_reward += reward;
-            println!("Cumulative reward: {}", self.cumulative_reward);
-            self.reward_history.push(reward as f32);
-
             let transition = Transition::new(
                 self.buffered_state.as_ref().unwrap(),
                 Self::action_to_index(buffered_action, simulator) as i64,
@@ -376,22 +377,27 @@ impl SimulatorAgent {
     pub fn quit_training(&mut self) {
         self.stage = SimulatorAgentStage::Reactive;
         self.cumulative_reward = 0.0;
+        self.reward_history.clear();
         self.task_kills = 0;
         self.task_starts = 0;
         self.mode_changes_to_hmode = 0;
         self.mode_changes_to_lmode = 0;
         self.events_history.clear();
-        self.target_network.free(&mut self.memory_target);
+        self.last_processed_event_index = 0;
+        self.buffered_action = None;
     }
 
     pub fn placebo_mode(&mut self) {
         self.stage = SimulatorAgentStage::Placebo;
         self.cumulative_reward = 0.0;
+        self.reward_history.clear();
         self.task_kills = 0;
         self.task_starts = 0;
         self.mode_changes_to_hmode = 0;
         self.mode_changes_to_lmode = 0;
         self.events_history.clear();
+        self.last_processed_event_index = 0;
+        self.buffered_action = None;
     }
 
     pub fn event_to_reward(event: &SimulatorEvent, _simulator: &Simulator) -> f64 {
@@ -449,12 +455,12 @@ impl SimulatorAgent {
             input.push(wcet_l);
             input.push(last_job_execution_time);
 
-            println!(
-                "Task {}: WCET_L: {}, Last job execution time: {}",
-                task.task.props().id,
-                wcet_l,
-                last_job_execution_time
-            );
+            // println!(
+            //     "Task {}: WCET_L: {}, Last job execution time: {}",
+            //     task.task.props().id,
+            //     wcet_l,
+            //     last_job_execution_time
+            // );
         }
 
         Tensor::from_slice(input.as_slice())
@@ -491,7 +497,7 @@ impl SimulatorAgent {
         if random_number > epsilon {
             println!("Using policy.");
             let value = tch::no_grad(|| policy.forward(storage, environment));
-            println!("Q-values: {}", value);
+            //    println!("Q-values: {}", value);
             let action_index = value.argmax(1, false).int64_value(&[]) as usize;
             Self::index_to_action(action_index, simulator)
         } else {
