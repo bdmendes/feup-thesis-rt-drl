@@ -77,78 +77,71 @@ fn tune(tasks: Vec<SimulatorTask>) {
         vec![tasks.len(), tasks.len() / 2, tasks.len() / 4],
     ];
     thread::scope(|scope| {
-        for update_freq in [
-            DEFAULT_UPDATE_FREQ,
-            DEFAULT_UPDATE_FREQ * 2,
-            DEFAULT_UPDATE_FREQ * 4,
+        for sample_batch_size in [
+            DEFAULT_SAMPLE_BATCH_SIZE,
+            DEFAULT_SAMPLE_BATCH_SIZE / 2,
+            DEFAULT_SAMPLE_BATCH_SIZE * 2,
         ] {
-            for sample_batch_size in [
-                DEFAULT_SAMPLE_BATCH_SIZE,
-                DEFAULT_SAMPLE_BATCH_SIZE / 2,
-                DEFAULT_SAMPLE_BATCH_SIZE * 2,
-            ] {
-                for hidden_sizes in &hidden_sizes_set {
-                    for activation_function in [
-                        ActivationFunction::Sigmoid,
-                        ActivationFunction::ReLU,
-                        ActivationFunction::Tanh,
-                    ] {
-                        hyper_iteration += 1;
-                        let tasks = tasks.clone();
-                        let hyper_events = hyper_events.clone();
-                        let number_of_actions = SimulatorAgent::number_of_actions(&tasks);
-                        let number_of_features = SimulatorAgent::number_of_features(&tasks);
+            for hidden_sizes in &hidden_sizes_set {
+                for activation_function in [
+                    ActivationFunction::Sigmoid,
+                    ActivationFunction::ReLU,
+                    ActivationFunction::Tanh,
+                ] {
+                    hyper_iteration += 1;
+                    let tasks = tasks.clone();
+                    let hyper_events = hyper_events.clone();
+                    let number_of_actions = SimulatorAgent::number_of_actions(&tasks);
+                    let number_of_features = SimulatorAgent::number_of_features(&tasks);
 
-                        scope.spawn(move || {
-                            let agent = Rc::new(RefCell::new(SimulatorAgent::new(
-                                DEFAULT_MEM_SIZE,
-                                DEFAULT_MIN_MEM_SIZE,
-                                DEFAULT_GAMMA,
-                                update_freq,
-                                DEFAULT_LEARNING_RATE,
-                                hidden_sizes.clone(),
+                    scope.spawn(move || {
+                        let agent = Rc::new(RefCell::new(SimulatorAgent::new(
+                            DEFAULT_MEM_SIZE,
+                            DEFAULT_MIN_MEM_SIZE,
+                            DEFAULT_GAMMA,
+                            DEFAULT_UPDATE_FREQ,
+                            DEFAULT_LEARNING_RATE,
+                            hidden_sizes.clone(),
+                            sample_batch_size,
+                            activation_function,
+                            number_of_actions,
+                            number_of_features,
+                        )));
+
+                        ////////// Training //////////
+                        {
+                            let mut simulator = Simulator {
+                                tasks: tasks.clone(),
+                                random_execution_time: true,
+                                agent: Some(agent.clone()),
+                                elapsed_times: vec![],
+                            };
+                            simulator.run::<false>(train_instants);
+                        }
+
+                        ////////// Testing //////////
+                        {
+                            agent.borrow_mut().quit_training();
+                            let mut simulator = Simulator {
+                                tasks: tasks.clone(),
+                                random_execution_time: true,
+                                agent: Some(agent.clone()),
+                                elapsed_times: vec![],
+                            };
+                            simulator.run::<false>(test_instants);
+                            let mut file =
+                                std::fs::File::create(format!("out/test_{hyper_iteration}.txt"))
+                                    .unwrap();
+                            write_result(&agent.borrow(), &mut file);
+                            hyper_events.lock().unwrap().push((
+                                bad_events(&agent.borrow()),
+                                DEFAULT_UPDATE_FREQ,
                                 sample_batch_size,
+                                hidden_sizes.clone(),
                                 activation_function,
-                                number_of_actions,
-                                number_of_features,
-                            )));
-
-                            ////////// Training //////////
-                            {
-                                let mut simulator = Simulator {
-                                    tasks: tasks.clone(),
-                                    random_execution_time: true,
-                                    agent: Some(agent.clone()),
-                                    elapsed_times: vec![],
-                                };
-                                simulator.run::<false>(train_instants);
-                            }
-
-                            ////////// Testing //////////
-                            {
-                                agent.borrow_mut().quit_training();
-                                let mut simulator = Simulator {
-                                    tasks: tasks.clone(),
-                                    random_execution_time: true,
-                                    agent: Some(agent.clone()),
-                                    elapsed_times: vec![],
-                                };
-                                simulator.run::<false>(test_instants);
-                                let mut file = std::fs::File::create(format!(
-                                    "out/test_{hyper_iteration}.txt"
-                                ))
-                                .unwrap();
-                                write_result(&agent.borrow(), &mut file);
-                                hyper_events.lock().unwrap().push((
-                                    bad_events(&agent.borrow()),
-                                    update_freq,
-                                    sample_batch_size,
-                                    hidden_sizes.clone(),
-                                    activation_function,
-                                ));
-                            }
-                        });
-                    }
+                            ));
+                        }
+                    });
                 }
             }
         }

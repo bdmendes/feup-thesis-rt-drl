@@ -57,6 +57,16 @@ pub struct TaskProps {
 }
 
 impl TaskProps {
+    pub fn new_empty(id: TaskId) -> Self {
+        Self {
+            id,
+            wcet_l: 0,
+            wcet_h: 0,
+            offset: 0,
+            period: 0,
+        }
+    }
+
     pub fn wcet_in_mode(&self, mode: SimulatorMode) -> TimeUnit {
         match mode {
             SimulatorMode::LMode => self.wcet_l,

@@ -2,7 +2,7 @@ use self::dqn::{Policy, ReplayMemory};
 use crate::agent::dqn::Transition;
 use crate::ml::tensor::{mean_squared_error, TensorStorage};
 use crate::ml::ComputeModel;
-use crate::simulator::task::{SimulatorTask, TimeUnit};
+use crate::simulator::task::{SimulatorTask, TaskProps, TimeUnit};
 use crate::simulator::validation::feasible_schedule_online;
 use crate::simulator::SimulatorMode;
 use crate::simulator::{task::TaskId, Simulator, SimulatorEvent};
@@ -18,32 +18,29 @@ pub const DEFAULT_UPDATE_FREQ: usize = 5;
 pub const DEFAULT_LEARNING_RATE: f32 = 0.00005;
 pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 6;
 
-#[derive(Debug)]
-pub enum SimulatorAction {
-    WcetIncreaseSmall(TaskId),
-    WcetIncreaseMedium(TaskId),
-    WcetIncreaseLarge(TaskId),
-    WcetDecreaseSmall(TaskId),
-    WcetDecreaseMedium(TaskId),
-    WcetDecreaseLarge(TaskId),
+pub type SimulatorAction = (
+    SimulatorActionPart,
+    SimulatorActionPart,
+    SimulatorActionPart,
+);
+
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub enum SimulatorActionPart {
+    WcetIncrease(TaskId), // 10% increase
+    WcetDecrease(TaskId), // 5% decrease
     None,
 }
 
-impl SimulatorAction {
+impl SimulatorActionPart {
     fn task_id(&self) -> TaskId {
         match self {
-            SimulatorAction::WcetIncreaseSmall(id)
-            | SimulatorAction::WcetIncreaseMedium(id)
-            | SimulatorAction::WcetIncreaseLarge(id)
-            | SimulatorAction::WcetDecreaseSmall(id)
-            | SimulatorAction::WcetDecreaseMedium(id)
-            | SimulatorAction::WcetDecreaseLarge(id) => *id,
-            SimulatorAction::None => panic!("No task id for None action"),
+            SimulatorActionPart::WcetIncrease(id) | SimulatorActionPart::WcetDecrease(id) => *id,
+            SimulatorActionPart::None => panic!("No task id for None action"),
         }
     }
 
     pub fn apply(&self, tasks: &mut [SimulatorTask]) {
-        if matches!(self, SimulatorAction::None) {
+        if matches!(self, SimulatorActionPart::None) {
             return;
         }
 
@@ -52,44 +49,31 @@ impl SimulatorAction {
             .find(|t| t.task.props().id == self.task_id())
             .unwrap();
 
-        let amount =
-            (task_to_change.task.props().wcet_h as f32
-                * match self {
-                    SimulatorAction::WcetIncreaseSmall(_)
-                    | SimulatorAction::WcetDecreaseSmall(_) => 0.1,
-                    SimulatorAction::WcetIncreaseMedium(_)
-                    | SimulatorAction::WcetDecreaseMedium(_) => 0.25,
-                    SimulatorAction::WcetIncreaseLarge(_)
-                    | SimulatorAction::WcetDecreaseLarge(_) => 0.5,
-                    _ => unreachable!(),
-                }) as TimeUnit;
+        let amount = (task_to_change.task.props().wcet_h as f32
+            * match self {
+                SimulatorActionPart::WcetIncrease(_) => 0.1,
+                SimulatorActionPart::WcetDecrease(_) => 0.05,
+                _ => unreachable!(),
+            }) as TimeUnit;
 
         match self {
-            SimulatorAction::WcetIncreaseSmall(_)
-            | SimulatorAction::WcetIncreaseMedium(_)
-            | SimulatorAction::WcetIncreaseLarge(_) => {
+            SimulatorActionPart::WcetIncrease(_) => {
                 task_to_change.task.props_mut().wcet_l =
                     task_to_change.task.props().wcet_l.saturating_add(amount);
             }
-            SimulatorAction::WcetDecreaseSmall(_)
-            | SimulatorAction::WcetDecreaseMedium(_)
-            | SimulatorAction::WcetDecreaseLarge(_) => {
+            SimulatorActionPart::WcetDecrease(_) => {
                 task_to_change.task.props_mut().wcet_l =
                     task_to_change.task.props().wcet_l.saturating_sub(amount);
             }
-            SimulatorAction::None => unreachable!(),
+            SimulatorActionPart::None => unreachable!(),
         }
     }
 
-    pub fn reverse(&self) -> SimulatorAction {
+    pub fn reverse(&self) -> SimulatorActionPart {
         match self {
-            SimulatorAction::WcetIncreaseSmall(id) => SimulatorAction::WcetDecreaseSmall(*id),
-            SimulatorAction::WcetIncreaseMedium(id) => SimulatorAction::WcetDecreaseMedium(*id),
-            SimulatorAction::WcetIncreaseLarge(id) => SimulatorAction::WcetDecreaseLarge(*id),
-            SimulatorAction::WcetDecreaseSmall(id) => SimulatorAction::WcetIncreaseSmall(*id),
-            SimulatorAction::WcetDecreaseMedium(id) => SimulatorAction::WcetIncreaseMedium(*id),
-            SimulatorAction::WcetDecreaseLarge(id) => SimulatorAction::WcetIncreaseLarge(*id),
-            SimulatorAction::None => SimulatorAction::None,
+            SimulatorActionPart::WcetIncrease(id) => SimulatorActionPart::WcetDecrease(*id),
+            SimulatorActionPart::WcetDecrease(id) => SimulatorActionPart::WcetIncrease(*id),
+            SimulatorActionPart::None => SimulatorActionPart::None,
         }
     }
 }
@@ -243,32 +227,28 @@ impl SimulatorAgent {
 
         // Get a new action from the policy.
         let action = match self.stage {
-            SimulatorAgentStage::Placebo => SimulatorAction::None,
+            SimulatorAgentStage::Placebo => vec![SimulatorActionPart::None],
             _ => Self::epsilon_greedy(
                 &self.memory_policy,
                 &self.policy_network,
                 self.epsilon,
                 &state,
                 simulator,
-            ),
+            )
+            .map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]),
         };
         println!("Got action: {:?}", action);
 
         // Apply it to the simulator.
         // If this is not valid, revert the action and ignore it.
-        action.apply(&mut simulator.tasks);
-        if !matches!(action, SimulatorAction::None) {
-            let task_changed = simulator
-                .tasks
-                .iter()
-                .find(|t| t.task.props().id == action.task_id())
-                .unwrap();
-            if !feasible_schedule_online(&simulator.tasks)
-                || task_changed.task.props().wcet_l > 2 * task_changed.task.props().wcet_h
-            {
+        action.iter().for_each(|a| a.apply(&mut simulator.tasks));
+        if !matches!(action[0], SimulatorActionPart::None) {
+            if !feasible_schedule_online(&simulator.tasks) {
                 println!("Invalid action {:?}, reverting.", action);
-                let reverse_action = action.reverse();
-                reverse_action.apply(&mut simulator.tasks);
+                let reverse_action = action.iter().map(|a| a.reverse()).collect::<Vec<_>>();
+                reverse_action
+                    .iter()
+                    .for_each(|a| a.apply(&mut simulator.tasks));
             } else {
                 println!("Applied action {:?}", action);
             }
@@ -314,7 +294,7 @@ impl SimulatorAgent {
             // We had taken an action previously, and are now receiving the reward.
             let transition = Transition::new(
                 self.buffered_state.as_ref().unwrap(),
-                Self::action_to_index(buffered_action, simulator) as i64,
+                Self::action_to_index(Some(buffered_action), simulator) as i64,
                 reward as f32,
                 &state,
             );
@@ -336,7 +316,11 @@ impl SimulatorAgent {
         }
 
         // Store this action and state to generate a transition later.
-        self.buffered_action = Some(action);
+        self.buffered_action = if action == vec![SimulatorActionPart::None] {
+            None
+        } else {
+            Some((action[0], action[1], action[2]))
+        };
         self.buffered_state = Some(state);
 
         // If we are not training, do nothing else.
@@ -454,35 +438,26 @@ impl SimulatorAgent {
 
             input.push(wcet_l);
             input.push(last_job_execution_time);
-
-            // println!(
-            //     "Task {}: WCET_L: {}, Last job execution time: {}",
-            //     task.task.props().id,
-            //     wcet_l,
-            //     last_job_execution_time
-            // );
         }
 
         Tensor::from_slice(input.as_slice())
     }
 
-    pub fn sample_simulator_action(simulator: &Simulator) -> SimulatorAction {
-        let index = rand::random::<usize>() % (simulator.tasks.len() + 1);
-
-        if index == simulator.tasks.len() {
-            return SimulatorAction::None;
+    pub fn sample_simulator_action(simulator: &Simulator) -> Option<SimulatorAction> {
+        let actions = Self::generate_actions(
+            simulator
+                .tasks
+                .iter()
+                .map(|t| t.task.props())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        let mut rng = rand::thread_rng();
+        let action_index = rng.gen_range(0..actions.len() + 1);
+        if action_index == actions.len() {
+            return None;
         }
-
-        let action_variant = rand::random::<usize>() % 6;
-        match action_variant {
-            0 => SimulatorAction::WcetIncreaseLarge(simulator.tasks[index].task.props().id),
-            1 => SimulatorAction::WcetIncreaseMedium(simulator.tasks[index].task.props().id),
-            2 => SimulatorAction::WcetIncreaseSmall(simulator.tasks[index].task.props().id),
-            3 => SimulatorAction::WcetDecreaseLarge(simulator.tasks[index].task.props().id),
-            4 => SimulatorAction::WcetDecreaseMedium(simulator.tasks[index].task.props().id),
-            5 => SimulatorAction::WcetDecreaseSmall(simulator.tasks[index].task.props().id),
-            _ => unreachable!(),
-        }
+        Some(actions[action_index])
     }
 
     pub fn epsilon_greedy(
@@ -491,13 +466,12 @@ impl SimulatorAgent {
         epsilon: f32,
         environment: &Tensor,
         simulator: &Simulator,
-    ) -> SimulatorAction {
+    ) -> Option<SimulatorAction> {
         let mut rng = rand::thread_rng();
         let random_number: f32 = rng.gen::<f32>();
         if random_number > epsilon {
             println!("Using policy.");
             let value = tch::no_grad(|| policy.forward(storage, environment));
-            //    println!("Q-values: {}", value);
             let action_index = value.argmax(1, false).int64_value(&[]) as usize;
             Self::index_to_action(action_index, simulator)
         } else {
@@ -507,8 +481,18 @@ impl SimulatorAgent {
     }
 
     pub fn number_of_actions(tasks: &[SimulatorTask]) -> usize {
-        // Increase and decrease WCET for each task * 3 diffs + No action.
-        tasks.len() * 2 * 3 + 1
+        if tasks.len() < 3 {
+            return 1; // Only the None action is available.
+        }
+        Self::generate_actions(
+            tasks
+                .iter()
+                .map(|t| t.task.props())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+        .len()
+            + 1
     }
 
     pub fn number_of_features(tasks: &[SimulatorTask]) -> usize {
@@ -517,46 +501,98 @@ impl SimulatorAgent {
         tasks.len() * 2
     }
 
-    fn index_to_action(index: usize, simulator: &Simulator) -> SimulatorAction {
-        let number_of_actions = Self::number_of_actions(&simulator.tasks);
-        if index == number_of_actions - 1 {
-            SimulatorAction::None
-        } else {
-            let task_idx = index / 6;
-            let task_id = simulator.tasks.get(task_idx).unwrap().task.props().id;
-            match index % 6 {
-                0 => SimulatorAction::WcetIncreaseSmall(task_id),
-                1 => SimulatorAction::WcetIncreaseMedium(task_id),
-                2 => SimulatorAction::WcetIncreaseLarge(task_id),
-                3 => SimulatorAction::WcetDecreaseSmall(task_id),
-                4 => SimulatorAction::WcetDecreaseMedium(task_id),
-                5 => SimulatorAction::WcetDecreaseLarge(task_id),
-                _ => unreachable!(),
+    fn generate_actions(tasks: &[TaskProps]) -> Vec<SimulatorAction> {
+        // Actions are tiples (increase(i), decrease(j), decrease(k))
+        // where i, j, k are the ids of the tasks.
+        let mut actions = Vec::new();
+
+        for prop in tasks {
+            let increase_first = SimulatorActionPart::WcetIncrease(prop.id);
+            let mut decrease_pairs = vec![];
+
+            for second_prop in tasks {
+                if second_prop.id == prop.id {
+                    continue;
+                }
+                let decrease_second = SimulatorActionPart::WcetDecrease(second_prop.id);
+                for third_prop in tasks {
+                    if third_prop.id == prop.id || third_prop.id == second_prop.id {
+                        continue;
+                    }
+                    let decrease_third = SimulatorActionPart::WcetDecrease(third_prop.id);
+
+                    // Avoid duplicate actions.
+                    if decrease_pairs
+                        .iter()
+                        .any(|(s, t)| *s == decrease_third && *t == decrease_second)
+                    {
+                        continue;
+                    }
+
+                    decrease_pairs.push((decrease_second, decrease_third));
+                    actions.push((increase_first, decrease_second, decrease_third));
+                }
             }
         }
+
+        actions
     }
 
-    fn action_to_index(action: &SimulatorAction, simulator: &Simulator) -> usize {
-        let number_of_actions = Self::number_of_actions(&simulator.tasks);
-        if matches!(action, SimulatorAction::None) {
-            return number_of_actions - 1;
+    fn index_to_action(index: usize, simulator: &Simulator) -> Option<SimulatorAction> {
+        let actions = Self::generate_actions(
+            simulator
+                .tasks
+                .iter()
+                .map(|t| t.task.props())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+        if index >= actions.len() {
+            return None;
         }
+        Some(actions[index])
+    }
 
-        let id = action.task_id();
-        let task_idx = simulator
-            .tasks
+    fn action_to_index(action: Option<&SimulatorAction>, simulator: &Simulator) -> usize {
+        let actions = Self::generate_actions(
+            simulator
+                .tasks
+                .iter()
+                .map(|t| t.task.props())
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+
+        if action.is_none() {
+            return actions.len(); // None is the last action.
+        }
+        actions
             .iter()
-            .position(|t| t.task.props().id == id)
-            .unwrap();
+            .position(|a| a == action.unwrap())
+            .expect("Action not found.")
+    }
+}
 
-        match action {
-            SimulatorAction::None => unreachable!(),
-            SimulatorAction::WcetIncreaseSmall(_) => task_idx * 6,
-            SimulatorAction::WcetIncreaseMedium(_) => task_idx * 6 + 1,
-            SimulatorAction::WcetIncreaseLarge(_) => task_idx * 6 + 2,
-            SimulatorAction::WcetDecreaseSmall(_) => task_idx * 6 + 3,
-            SimulatorAction::WcetDecreaseMedium(_) => task_idx * 6 + 4,
-            SimulatorAction::WcetDecreaseLarge(_) => task_idx * 6 + 5,
+#[cfg(test)]
+mod tests {
+    use crate::simulator::task::TaskProps;
+
+    #[test]
+    fn generate_actions() {
+        let props = vec![
+            TaskProps::new_empty(0),
+            TaskProps::new_empty(1),
+            TaskProps::new_empty(2),
+            TaskProps::new_empty(3),
+            TaskProps::new_empty(4),
+            TaskProps::new_empty(5),
+        ];
+        let actions = super::SimulatorAgent::generate_actions(&props);
+        for action in &actions {
+            println!("{:?}", action);
         }
+
+        let expected_number = 6 * (5 * 4) / 2;
+        assert_eq!(actions.len(), expected_number);
     }
 }
