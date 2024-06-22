@@ -32,8 +32,8 @@ def copy_out_directory(try_index):
     shutil.copytree(out_dir, destination_dir)
 
 
-# Main loop to execute the process 20 times
-for try_index in range(20):
+# Main loop to execute the process 50 times
+for try_index in range(50):
     clear_directory(out_dir)
 
     if run_cargo():

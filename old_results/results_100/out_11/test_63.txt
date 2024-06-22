@@ -1,1 +1,0 @@
-Cumulative reward: -494.79999999997733; mode changes to H: 378; mode changes to L: 378; task kills: 9, task starts: 2702

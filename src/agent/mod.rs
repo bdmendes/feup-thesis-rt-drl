@@ -300,7 +300,6 @@ impl SimulatorAgent {
             );
 
             println!("Pushing transition to replay memory: {:?}", transition);
-
             match self.stage {
                 SimulatorAgentStage::DataCollection => {
                     if self.replay_memory.add_initial(transition) {
@@ -308,10 +307,9 @@ impl SimulatorAgent {
                         self.stage = SimulatorAgentStage::Training;
                     }
                 }
-                SimulatorAgentStage::Training => {
+                _ => {
                     self.replay_memory.add(transition);
                 }
-                _ => {}
             }
         }
 
