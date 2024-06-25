@@ -107,9 +107,9 @@ impl Transition {
 }
 
 pub struct ReplayMemory {
-    transitions: VecDeque<Transition>,
-    capacity: usize,
-    min_size: usize,
+    pub transitions: VecDeque<Transition>,
+    pub capacity: usize,
+    pub min_size: usize,
 }
 
 impl ReplayMemory {

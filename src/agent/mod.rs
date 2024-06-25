@@ -106,6 +106,7 @@ pub struct SimulatorAgent {
     task_kills: usize,
     task_starts: usize,
     last_processed_event_index: usize,
+    track: bool,
 
     // DQN parameters.
     sample_batch_size: usize,
@@ -172,6 +173,7 @@ impl SimulatorAgent {
 
         Self {
             events_history: Vec::new(),
+            track: true,
             cumulative_reward: 0.0,
             gamma,
             update_freq,
@@ -216,7 +218,14 @@ impl SimulatorAgent {
     }
 
     pub fn push_event(&mut self, event: SimulatorEvent) {
+        if self.events_history.len() > self.replay_memory.capacity - 1 {
+            self.events_history.remove(0);
+        }
         self.events_history.push(event);
+    }
+
+    pub fn skip_tracking(&mut self) {
+        self.track = false;
     }
 
     pub fn activate(&mut self, simulator: &mut Simulator) {
@@ -255,30 +264,32 @@ impl SimulatorAgent {
         }
 
         // Track events.
-        self.task_kills += self
-            .events_history
-            .iter()
-            .skip(self.last_processed_event_index)
-            .filter(|e| matches!(e, SimulatorEvent::TaskKill(_, _)))
-            .count();
-        self.mode_changes_to_hmode += self
-            .events_history
-            .iter()
-            .skip(self.last_processed_event_index)
-            .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::HMode, _)))
-            .count();
-        self.mode_changes_to_lmode += self
-            .events_history
-            .iter()
-            .skip(self.last_processed_event_index)
-            .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::LMode, _)))
-            .count();
-        self.task_starts += self
-            .events_history
-            .iter()
-            .skip(self.last_processed_event_index)
-            .filter(|e| matches!(e, SimulatorEvent::Start(_, _)))
-            .count();
+        if self.track {
+            self.task_kills += self
+                .events_history
+                .iter()
+                .skip(self.last_processed_event_index)
+                .filter(|e| matches!(e, SimulatorEvent::TaskKill(_, _)))
+                .count();
+            self.mode_changes_to_hmode += self
+                .events_history
+                .iter()
+                .skip(self.last_processed_event_index)
+                .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::HMode, _)))
+                .count();
+            self.mode_changes_to_lmode += self
+                .events_history
+                .iter()
+                .skip(self.last_processed_event_index)
+                .filter(|e| matches!(e, SimulatorEvent::ModeChange(SimulatorMode::LMode, _)))
+                .count();
+            self.task_starts += self
+                .events_history
+                .iter()
+                .skip(self.last_processed_event_index)
+                .filter(|e| matches!(e, SimulatorEvent::Start(_, _)))
+                .count();
+        }
         let reward = self
             .events_history
             .iter()
@@ -307,9 +318,10 @@ impl SimulatorAgent {
                         self.stage = SimulatorAgentStage::Training;
                     }
                 }
-                _ => {
+                SimulatorAgentStage::Training => {
                     self.replay_memory.add(transition);
                 }
+                _ => {}
             }
         }
 
@@ -398,22 +410,22 @@ impl SimulatorAgent {
         });
 
         if let Some(last_end_event_offset) = last_end_event_offset {
-            let previous_start_event = history
-                .iter()
-                .rev()
-                .skip(last_end_event_offset)
-                .find(|e| match e {
-                    SimulatorEvent::Start(e_id, _) => *e_id == id,
-                    _ => false,
-                })
-                .unwrap();
             let end_time = match history.iter().rev().nth(last_end_event_offset).unwrap() {
                 SimulatorEvent::End(_, time) => time,
                 _ => unreachable!(),
             };
+            let previous_start_event =
+                history
+                    .iter()
+                    .rev()
+                    .skip(last_end_event_offset)
+                    .find(|e| match e {
+                        SimulatorEvent::Start(e_id, _) => *e_id == id,
+                        _ => false,
+                    });
             let start_time = match previous_start_event {
-                SimulatorEvent::Start(_, time) => *time,
-                _ => unreachable!(),
+                Some(SimulatorEvent::Start(_, time)) => *time,
+                _ => *end_time,
             };
             return Some((end_time - start_time) as TimeUnit);
         }

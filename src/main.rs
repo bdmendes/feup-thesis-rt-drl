@@ -261,6 +261,7 @@ fn activation_time_size(hidden_sizes: Vec<usize>, set: &[Vec<SimulatorTask>]) {
         SimulatorAgent::number_of_features(&set[0]),
     )));
     agent.borrow_mut().placebo_mode();
+    agent.borrow_mut().skip_tracking();
     let mut simulator = Simulator {
         tasks: set[0].clone(),
         random_execution_time: true,
