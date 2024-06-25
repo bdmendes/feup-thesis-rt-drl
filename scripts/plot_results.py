@@ -2,7 +2,7 @@ from genericpath import isfile
 from os import listdir
 import matplotlib.pyplot as plt
 
-TOTAL_TRIALS = 20
+TOTAL_TRIALS = 50
 
 
 def collect_data(lines):
@@ -41,15 +41,32 @@ def plot_data(index: int, label: str):
     placebo_data_filtered = []
     best_data_filtered = []
     for i in range(0, TOTAL_TRIALS):
-        if abs(placebo_data[i][index] / max(best_data[i][index], 1)) < 10:
+        is_outlier = False
+        for j in range(0, 4):
+            if abs(placebo_data[i][j] / max(best_data[i][j], 1)) > 20:
+                is_outlier = True
+                break
+        if not is_outlier:
             placebo_data_filtered.append(placebo_data[i])
             best_data_filtered.append(best_data[i])
+        else:
+            print(f"Trial {i} is an outlier")
+    print(f"Filtered {TOTAL_TRIALS - len(placebo_data_filtered)} outliers\n")
+
+    placebo_data_filtered = placebo_data_filtered[:25]
+    best_data_filtered = best_data_filtered[:25]
 
     y_placebo = [x[index] for x in placebo_data_filtered]
     x_placebo = list(range(len(y_placebo)))
 
     y_best = [x[index] for x in best_data_filtered]
     x_best = list(range(len(y_best)))
+
+    # Use bigger width for better visibility
+    plt.figure(figsize=(10, 5))
+
+    # Use bigger font
+    plt.rcParams.update({"font.size": 12})
 
     # Clear the current figure
     plt.clf()
