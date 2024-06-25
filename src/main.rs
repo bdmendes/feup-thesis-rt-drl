@@ -268,7 +268,7 @@ fn activation_time_size(hidden_sizes: Vec<usize>, set: &[Vec<SimulatorTask>]) {
         elapsed_times: vec![],
         memory_usage: vec![],
     };
-    simulator.run::<false>(Runnable::duration_to_time_unit(Duration::from_secs(10)));
+    simulator.run::<false>(Runnable::duration_to_time_unit(Duration::from_secs(2)));
 
     // write activation times
     let mut file =
