@@ -1,3 +1,4 @@
+use memory_stats::memory_stats;
 use probability::source;
 
 use self::task::{SimulatorTask, Task, TaskId, TimeUnit};
@@ -59,6 +60,7 @@ pub struct Simulator {
     pub random_execution_time: bool,
     pub agent: Option<Rc<RefCell<SimulatorAgent>>>,
     pub elapsed_times: Vec<time::Duration>,
+    pub memory_usage: Vec<(usize, usize)>,
 }
 
 impl Simulator {
@@ -281,6 +283,9 @@ impl Simulator {
                     agent.borrow_mut().activate(self);
                     let elapsed = time.elapsed();
                     self.elapsed_times.push(elapsed);
+                    let mem_stats = memory_stats().unwrap();
+                    self.memory_usage
+                        .push((mem_stats.physical_mem, mem_stats.virtual_mem));
                     self.agent = Some(agent);
                 }
 
@@ -375,6 +380,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -439,6 +445,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -491,6 +498,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(8);
 
@@ -541,6 +549,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(12);
 
@@ -602,6 +611,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(12);
 
@@ -665,6 +675,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -702,6 +713,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 
@@ -733,6 +745,7 @@ mod tests {
             random_execution_time: false,
             agent: None,
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
         let (tasks, events) = simulator.run::<true>(10);
 

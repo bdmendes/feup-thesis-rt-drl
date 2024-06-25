@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 ctor = "0.2.8"
 gnuplot = "0.0.43"
+memory-stats = "1.1.0"
 probability = "0.20.3"
 rand = "0.8.5"
 rayon = "1.10.0"

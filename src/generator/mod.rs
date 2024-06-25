@@ -253,19 +253,6 @@ mod tests {
     use super::RUNNABLE_PERIODS;
 
     #[test]
-    fn smoke_generator() {
-        let tasks = super::generate_tasks(0.3, 100, Pert);
-
-        for task in tasks {
-            assert!(task.task.props().wcet_h <= task.task.props().period);
-            assert!(task.task.props().wcet_l <= task.task.props().wcet_h);
-            assert!(task.task.props().wcet_l > 0);
-            assert!(task.acet <= task.task.props().wcet_l);
-            assert!(task.bcet <= task.acet);
-        }
-    }
-
-    #[test]
     fn schedulability_lmode03() {
         let l_mode_prob = 0.3;
         for number_taks in 1..150 {

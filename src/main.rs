@@ -63,6 +63,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
             random_execution_time: true,
             agent: Some(agent.clone()),
             elapsed_times: vec![],
+            memory_usage: vec![],
         };
 
         simulator.run::<false>(test_instants);
@@ -115,6 +116,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                                 random_execution_time: true,
                                 agent: Some(agent.clone()),
                                 elapsed_times: vec![],
+                                memory_usage: vec![],
                             };
                             simulator.run::<false>(train_instants);
                         }
@@ -127,6 +129,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                                 random_execution_time: true,
                                 agent: Some(agent.clone()),
                                 elapsed_times: vec![],
+                                memory_usage: vec![],
                             };
                             simulator.run::<false>(test_instants);
                             let mut file =
@@ -185,6 +188,7 @@ fn simulate_placebo(tasks: Vec<SimulatorTask>, secs: usize) -> (usize, usize) {
         random_execution_time: true,
         agent: Some(agent.clone()),
         elapsed_times: vec![],
+        memory_usage: vec![],
     };
 
     simulator.run::<false>(test_instants);
@@ -243,6 +247,67 @@ pub fn placebo() {
     }
 }
 
+fn activation_time_size(hidden_sizes: Vec<usize>, set: &[Vec<SimulatorTask>]) {
+    let agent = Rc::new(RefCell::new(SimulatorAgent::new(
+        DEFAULT_MEM_SIZE,
+        DEFAULT_MIN_MEM_SIZE,
+        DEFAULT_GAMMA,
+        DEFAULT_UPDATE_FREQ,
+        DEFAULT_LEARNING_RATE,
+        hidden_sizes.clone(),
+        DEFAULT_SAMPLE_BATCH_SIZE,
+        ActivationFunction::Sigmoid,
+        SimulatorAgent::number_of_actions(&set[0]),
+        SimulatorAgent::number_of_features(&set[0]),
+    )));
+    agent.borrow_mut().placebo_mode();
+    let mut simulator = Simulator {
+        tasks: set[0].clone(),
+        random_execution_time: true,
+        agent: Some(agent.clone()),
+        elapsed_times: vec![],
+        memory_usage: vec![],
+    };
+    simulator.run::<false>(Runnable::duration_to_time_unit(Duration::from_secs(10)));
+
+    // write activation times
+    let mut file =
+        std::fs::File::create(format!("out/activation_times_{}.txt", hidden_sizes.len())).unwrap();
+    let _ = file.write_all(
+        simulator
+            .elapsed_times
+            .iter()
+            .map(|x| x.as_micros().to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_string()
+            .as_bytes(),
+    );
+
+    // write memory usage
+    let mut file =
+        std::fs::File::create(format!("out/memory_usage_{}.txt", hidden_sizes.len())).unwrap();
+    let _ = file.write_all(
+        simulator
+            .memory_usage
+            .iter()
+            .map(|x| format!("{:.2} {:.2}", x.0, x.1))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .to_string()
+            .as_bytes(),
+    );
+}
+
+pub fn activation_time() {
+    std::fs::create_dir_all("out").unwrap();
+    let set = generate_sets(1, 100);
+
+    activation_time_size(vec![set[0].len() / 2], &set);
+    activation_time_size(vec![set[0].len(), set[0].len() / 2, set[0].len() / 4], &set);
+}
+
 fn main() {
-    hp_tuning();
+    //hp_tuning();
+    activation_time();
 }
