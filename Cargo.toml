@@ -11,4 +11,4 @@ probability = "0.20.3"
 rand = "0.8.5"
 rayon = "1.10.0"
 serde = "1.0.203"
-tch = {version = "0.15.0", features = ["download-libtorch"]}
+tch = {version = "0.10.0"}
