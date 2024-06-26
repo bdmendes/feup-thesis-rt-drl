@@ -152,8 +152,8 @@ impl ReplayMemory {
         });
         (
             Tensor::stack(&states, 0),
-            Tensor::from_slice(actions.as_slice()).unsqueeze(1),
-            Tensor::from_slice(rewards.as_slice()).unsqueeze(1),
+            Tensor::from(actions.as_slice()).unsqueeze(1),
+            Tensor::from(rewards.as_slice()).unsqueeze(1),
             Tensor::stack(&states_, 0),
         )
     }

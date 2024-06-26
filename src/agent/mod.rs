@@ -450,7 +450,7 @@ impl SimulatorAgent {
             input.push(last_job_execution_time);
         }
 
-        Tensor::from_slice(input.as_slice())
+        Tensor::from(input.as_slice())
     }
 
     pub fn sample_simulator_action(simulator: &Simulator) -> Option<SimulatorAction> {
