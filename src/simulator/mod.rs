@@ -3,26 +3,22 @@ use probability::source;
 
 use self::task::{SimulatorTask, Task, TaskId, TimeUnit};
 use crate::agent::SimulatorAgent;
-use std::{cell::RefCell, rc::Rc, time};
+use std::{
+    cell::RefCell,
+    collections::{BinaryHeap, HashMap},
+    rc::Rc,
+    time,
+};
 
 pub mod task;
 pub mod validation;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, Clone)]
 struct SimulatorJob {
-    task_id: TaskId,
-    running_for: TimeUnit,
-    remaining: TimeUnit,
-}
-
-impl SimulatorJob {
-    fn task<'a>(&self, simulator: &'a Simulator) -> &'a SimulatorTask {
-        simulator
-            .tasks
-            .iter()
-            .find(|t| t.task.props().id == self.task_id)
-            .unwrap()
-    }
+    task: Rc<RefCell<SimulatorTask>>,
+    exec_time: TimeUnit,
+    run_time: TimeUnit,
+    event: Rc<RefCell<SimulatorEvent>>,
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -31,311 +27,113 @@ pub enum SimulatorMode {
     HMode,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum SimulatorEvent {
-    Start(TaskId, TimeUnit),
-    End(TaskId, TimeUnit),
-    TaskKill(TaskId, TimeUnit),
+    Start(Rc<RefCell<SimulatorTask>>, TimeUnit),
+    End(Rc<RefCell<SimulatorTask>>, TimeUnit),
+    TaskKill(Rc<RefCell<SimulatorTask>>, TimeUnit),
     ModeChange(SimulatorMode, TimeUnit),
-    EndSimulation,
 }
 
 impl SimulatorEvent {
-    pub fn task<'a>(&self, simulator: &'a Simulator) -> Option<&'a SimulatorTask> {
+    pub fn priority(&self, simulator: &Simulator) -> Option<TimeUnit> {
         match self {
-            SimulatorEvent::Start(task_id, _) | SimulatorEvent::TaskKill(task_id, _) => Some(
-                simulator
-                    .tasks
-                    .iter()
-                    .find(|t| t.task.props().id == *task_id)
-                    .unwrap(),
-            ),
+            SimulatorEvent::Start(task, time)
+            | SimulatorEvent::End(task, time)
+            | SimulatorEvent::TaskKill(task, time) => {
+                let task = task.borrow();
+                Some(
+                    time * simulator.tasks.len() as TimeUnit + simulator.tasks.len() as TimeUnit
+                        - task.task.props().id,
+                )
+            }
             _ => None,
         }
     }
 }
 
 pub struct Simulator {
-    pub tasks: Vec<SimulatorTask>,
-    pub random_execution_time: bool,
-    pub agent: Option<Rc<RefCell<SimulatorAgent>>>,
-    pub elapsed_times: Vec<time::Duration>,
-    pub memory_usage: Vec<(usize, usize)>,
+    pub tasks: Vec<Rc<RefCell<SimulatorTask>>>,
+    random_execution_time: bool,
+    agent: Option<Rc<RefCell<SimulatorAgent>>>,
+    elapsed_times: Vec<time::Duration>,
+    memory_usage: Vec<(usize, usize)>,
+
+    // Needed during simulation.
+    // Inited during constructor; should not reuse the same simulator for multiple simulations.
+    random_source: source::Xorshift128Plus, // TODO: make seed configurable
+    jobs: HashMap<TaskId, SimulatorJob>,    // max 1 job per task
+    running_job: Option<Rc<RefCell<SimulatorJob>>>,
+    ready_jobs_queue: BinaryHeap<Rc<RefCell<SimulatorJob>>>, // except the one that is currently running
+    event_queue: BinaryHeap<Rc<RefCell<SimulatorEvent>>>,    // only start and end events
+    event_history: Vec<Rc<RefCell<SimulatorEvent>>>, // all events, used if RETURN_FULL_HISTORY is set
 }
 
 impl Simulator {
-    pub fn run<const RETURN_FULL_HISTORY: bool>(
+    pub fn new(
+        tasks: Vec<SimulatorTask>,
+        random_execution_time: bool,
+        agent: Option<Rc<RefCell<SimulatorAgent>>>,
+    ) -> Self {
+        let tasks = tasks
+            .into_iter()
+            .map(|task| {
+                Rc::new(RefCell::new({
+                    // In the simulator, the task id is used to determine the order of execution (priority).
+                    let mut task = task;
+                    task.task.props_mut().id = task.task.props().id + task.task.props().period;
+                    task
+                }))
+            })
+            .collect::<Vec<_>>();
+        Self {
+            tasks,
+            random_execution_time,
+            agent: None,
+            elapsed_times: vec![],
+            memory_usage: vec![],
+            random_source: source::default(42),
+            jobs: HashMap::new(),
+            running_job: None,
+            ready_jobs_queue: BinaryHeap::new(),
+            event_queue: BinaryHeap::new(),
+            event_history: vec![],
+        }
+    }
+
+    fn init_event_queue(&mut self) {
+        for task in &self.tasks {
+            // Generate the first arrival event.
+            let event = Rc::new(RefCell::new(SimulatorEvent::Start(
+                task.clone(),
+                task.borrow().task.props().offset,
+            )));
+
+            // Create a job for the task.
+            let job = Rc::new(RefCell::new(SimulatorJob {
+                task: task.clone(),
+                exec_time: 0,
+                run_time: 0,
+                event,
+            }));
+
+            // Push the job to the ready queue.
+            self.ready_jobs_queue.push(job.clone());
+        }
+    }
+
+    pub fn fire<const RETURN_FULL_HISTORY: bool>(
         &mut self,
         duration: TimeUnit,
     ) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent>) {
-        let mut run_history = vec![];
-        let mut simulator_events_history = vec![];
-        let mut current_mode = SimulatorMode::LMode;
-        let mut current_running_jobs = Vec::<SimulatorJob>::new();
-        let mut random_source = source::default(42);
-
-        // Prepare the first start events.
-        let mut task_start_events = self
-            .tasks
-            .iter()
-            .flat_map(|task| {
-                let props = task.task.props();
-                (props.offset..duration)
-                    .step_by(props.period as usize)
-                    .next()
-                    .map(move |activation_time| {
-                        SimulatorEvent::Start(task.task.props().id, activation_time)
-                    })
-            })
-            .collect::<Vec<_>>();
-
-        // Run the simulation.
-        let mut time = 0;
-        let mut prev_time = TimeUnit::MAX;
-        while time < duration {
-            if time == prev_time {
-                panic!("Simulation is stuck at instant {}", time);
-            }
-            prev_time = time;
-
-            // Determine tasks starting now, according to the current mode
-            let new_jobs = task_start_events
-                .iter()
-                .filter(|event| match event {
-                    SimulatorEvent::Start(_, instant) => {
-                        time == *instant
-                            && (matches!(current_mode, SimulatorMode::LMode)
-                                || matches!(event.task(self).unwrap().task, Task::HTask(_)))
-                    }
-                    _ => unreachable!(),
-                })
-                .map(|event| match event {
-                    SimulatorEvent::Start(_, _) => {
-                        let task = event.task(self).unwrap();
-                        SimulatorJob {
-                            task_id: task.task.props().id,
-                            running_for: 0,
-                            remaining: if self.random_execution_time {
-                                Task::sample_execution_time(
-                                    task.acet,
-                                    task.bcet,
-                                    task.task.props().wcet_h,
-                                    &mut random_source,
-                                    crate::generator::TimeSampleDistribution::Pert,
-                                )
-                            } else {
-                                task.acet
-                            },
-                        }
-                    }
-                    _ => unreachable!(),
-                })
-                .collect::<Vec<_>>();
-
-            current_running_jobs.extend(new_jobs);
-            current_running_jobs.sort_by(|a, b| a.task(self).priority.cmp(&b.task(self).priority));
-
-            // Check for multiple jobs for the same tasks.
-            // This can't happen since we're assuming D=T.
-            for job in &current_running_jobs {
-                if current_running_jobs
-                    .iter()
-                    .filter(|j| j.task(self).task.props().id == job.task(self).task.props().id)
-                    .count()
-                    > 1
-                {
-                    println!(
-                        "Multiple jobs of the same task at instant {}; the system is not schedulable: {:?}.",
-                        time, current_running_jobs
-                    );
-                    return (None, simulator_events_history);
-                }
-            }
-
-            // Update the most prioritary job for this instant.
-            if let Some(job) = current_running_jobs.first_mut() {
-                if job.running_for == 0 {
-                    // Schedule the next start event.
-                    let this_task_start_event = task_start_events
-                        .iter_mut()
-                        .find(|e| match e {
-                            SimulatorEvent::Start(id, _) => *id == job.task(self).task.props().id,
-                            _ => unreachable!(),
-                        })
-                        .unwrap();
-                    let previous_instant = match this_task_start_event {
-                        SimulatorEvent::Start(_, instant) => instant,
-                        _ => unreachable!(),
-                    };
-                    let new_instant = *previous_instant + job.task(self).task.props().period;
-                    *this_task_start_event =
-                        SimulatorEvent::Start(job.task(self).task.props().id, new_instant);
-
-                    if RETURN_FULL_HISTORY {
-                        simulator_events_history
-                            .push(SimulatorEvent::Start(job.task(self).task.props().id, time));
-                    }
-
-                    if self.agent.is_some() {
-                        // Signal task start to agent.
-                        self.agent.as_ref().unwrap().borrow_mut().push_event(
-                            SimulatorEvent::Start(job.task(self).task.props().id, time),
-                        );
-                    }
-                }
-
-                job.running_for += 1;
-                job.remaining -= 1;
-
-                if RETURN_FULL_HISTORY {
-                    run_history.push(Some(job.task(self).task.props().id));
-                }
-            }
-
-            if let Some(job) = current_running_jobs.first().cloned() {
-                if job.remaining == 0 {
-                    // Job has ended. Remove it.
-                    current_running_jobs
-                        .retain(|j| j.task(self).task.props().id != job.task(self).task.props().id);
-
-                    // Push task end.
-                    if RETURN_FULL_HISTORY {
-                        simulator_events_history
-                            .push(SimulatorEvent::End(job.task(self).task.props().id, time));
-                    }
-
-                    // Signal task end to agent.
-                    if self.agent.is_some() {
-                        self.agent
-                            .as_ref()
-                            .unwrap()
-                            .borrow_mut()
-                            .push_event(SimulatorEvent::End(job.task(self).task.props().id, time));
-                    }
-                } else if matches!(current_mode, SimulatorMode::HMode)
-                    && job.running_for >= job.task(self).task.props().wcet_h
-                {
-                    // Task has surpassed its worst case execution time in H-mode.
-                    // The system is not schedulable.
-                    println!(
-                        "Task {} has surpassed its worst case execution time in H-mode.",
-                        job.task(self).task.props().id
-                    );
-                    return (None, simulator_events_history);
-                } else if matches!(current_mode, SimulatorMode::LMode)
-                    && job.running_for >= job.task(self).task.props().wcet_l
-                {
-                    // Task has surpassed its worst case execution time in L-mode
-                    if matches!(job.task(self).task, Task::HTask(_)) {
-                        // This is a HTask. We must switch mode immediately.
-                        println!("Task {} has surpassed its worst case execution time in L-mode. Switching to H-mode.", job.task(self).task.props().id);
-                        current_mode = SimulatorMode::HMode;
-                        current_running_jobs
-                            .retain(|job| matches!(job.task(self).task, Task::HTask(_)));
-
-                        if RETURN_FULL_HISTORY {
-                            simulator_events_history
-                                .push(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
-                        }
-
-                        // Inform the agent of the mode change.
-                        if self.agent.is_some() {
-                            self.agent
-                                .as_ref()
-                                .unwrap()
-                                .borrow_mut()
-                                .push_event(SimulatorEvent::ModeChange(SimulatorMode::HMode, time));
-                        }
-                    } else {
-                        // We could go about this in some ways, but in an attempt to try to preserve
-                        // more LTasks, we only kill the current job.
-                        println!("Task {} has surpassed its worst case execution time in L-mode. Killing task.", job.task(self).task.props().id);
-                        current_running_jobs.retain(|j| {
-                            j.task(self).task.props().id != job.task(self).task.props().id
-                        });
-
-                        if RETURN_FULL_HISTORY {
-                            simulator_events_history.push(SimulatorEvent::TaskKill(
-                                job.task(self).task.props().id,
-                                time,
-                            ));
-                        }
-
-                        if self.agent.is_some() {
-                            // Inform the agent of the task kill.
-                            self.agent.as_ref().unwrap().borrow_mut().push_event(
-                                SimulatorEvent::TaskKill(job.task(self).task.props().id, time),
-                            );
-                        }
-                    }
-                }
-
-                time += 1;
-            } else {
-                // No task is running. We can run the agent.
-                // This will trigger event processing
-                // and tasks props changes.
-
-                if self.agent.is_some() {
-                    let agent = self.agent.take().unwrap();
-                    println!("Agent is running. instant={}", time);
-                    let time = time::Instant::now();
-                    agent.borrow_mut().activate(self);
-                    let elapsed = time.elapsed();
-                    self.elapsed_times.push(elapsed);
-                    let mem_stats = memory_stats().unwrap();
-                    self.memory_usage
-                        .push((mem_stats.physical_mem, mem_stats.virtual_mem));
-                    self.agent = Some(agent);
-                }
-
-                if current_mode != SimulatorMode::LMode {
-                    current_mode = SimulatorMode::LMode;
-
-                    if RETURN_FULL_HISTORY {
-                        simulator_events_history
-                            .push(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
-                    }
-
-                    if self.agent.is_some() {
-                        // Inform the agent of the mode change.
-                        self.agent
-                            .as_ref()
-                            .unwrap()
-                            .borrow_mut()
-                            .push_event(SimulatorEvent::ModeChange(SimulatorMode::LMode, time));
-                    }
-                }
-
-                if RETURN_FULL_HISTORY {
-                    run_history.push(None);
-                    time += 1;
-                } else {
-                    let next_start_event = task_start_events
-                        .iter()
-                        .filter(|e| match e {
-                            SimulatorEvent::Start(_, instant) => *instant > time,
-                            _ => unreachable!(),
-                        })
-                        .min_by_key(|e| match e {
-                            SimulatorEvent::Start(_, instant) => *instant,
-                            _ => unreachable!(),
-                        });
-                    time = match next_start_event {
-                        Some(SimulatorEvent::Start(_, instant)) => *instant,
-                        _ => time,
-                    };
-                    println!("No task is running. Skipping to instant {}", time);
-                }
-            }
-        }
-
-        (Some(run_history), simulator_events_history)
+        (todo!(), self.event_history)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use crate::simulator::SimulatorEvent;
 
     use super::{task::TaskProps, Simulator, SimulatorTask};
@@ -346,7 +144,28 @@ mod tests {
             .filter(|e| !matches!(e, SimulatorEvent::Start(_, _) | SimulatorEvent::End(_, _)))
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(events_with_stripped_start_end, expected);
+        for (event, expected) in events_with_stripped_start_end.iter().zip(expected.iter()) {
+            match (event, expected) {
+                (
+                    SimulatorEvent::TaskKill(task, time),
+                    SimulatorEvent::TaskKill(expected_task, expected_time),
+                ) => {
+                    assert_eq!(
+                        task.borrow().task.props().id,
+                        expected_task.borrow().task.props().id
+                    );
+                    assert_eq!(time, expected_time);
+                }
+                (
+                    SimulatorEvent::ModeChange(mode, time),
+                    SimulatorEvent::ModeChange(expected_mode, expected_time),
+                ) => {
+                    assert_eq!(mode, expected_mode);
+                    assert_eq!(time, expected_time);
+                }
+                _ => panic!("Events do not match"),
+            }
+        }
     }
 
     #[test]
@@ -375,14 +194,8 @@ mod tests {
             2,
         );
 
-        let mut simulator = Simulator {
-            tasks: vec![task1, task2],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(10);
+        let mut simulator = Simulator::new(vec![task1, task2], false, None);
+        let (tasks, events) = simulator.fire::<true>(10);
 
         assert_eq!(
             tasks.unwrap(),
@@ -440,14 +253,8 @@ mod tests {
             1,
         );
 
-        let mut simulator = Simulator {
-            tasks: vec![task1, task2, task3],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(10);
+        let mut simulator = Simulator::new(vec![task1, task2, task3], false, None);
+        let (tasks, events) = simulator.fire::<true>(10);
 
         assert_eq!(
             tasks.unwrap(),
@@ -493,14 +300,8 @@ mod tests {
             2,
         );
 
-        let mut simulator = Simulator {
-            tasks: vec![task1, task2],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(8);
+        let mut simulator = Simulator::new(vec![task1, task2], false, None);
+        let (tasks, events) = simulator.fire::<true>(8);
 
         assert_eq!(
             tasks.unwrap(),
@@ -544,14 +345,8 @@ mod tests {
             2,
         );
 
-        let mut simulator = Simulator {
-            tasks: vec![task1.clone(), task2.clone()],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(12);
+        let mut simulator = Simulator::new(vec![task1.clone(), task2.clone()], false, None);
+        let (tasks, events) = simulator.fire::<true>(12);
 
         assert_eq!(
             tasks.unwrap(),
@@ -574,9 +369,9 @@ mod tests {
         assert_events_eq(
             events,
             vec![
-                SimulatorEvent::TaskKill(task1.task.props().id, 1),
-                SimulatorEvent::TaskKill(task1.task.props().id, 6),
-                SimulatorEvent::TaskKill(task1.task.props().id, 11),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1)), 1),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1)), 6),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1)), 11),
             ],
         );
     }
@@ -606,14 +401,8 @@ mod tests {
             2,
         );
 
-        let mut simulator = Simulator {
-            tasks: vec![task1, task2],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(12);
+        let mut simulator = Simulator::new(vec![task1, task2], false, None);
+        let (tasks, events) = simulator.fire::<true>(12);
 
         assert_eq!(
             tasks.unwrap(),
@@ -670,14 +459,8 @@ mod tests {
             3,
         );
 
-        let mut simulator = Simulator {
-            tasks: vec![task1, task2],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(10);
+        let mut simulator = Simulator::new(vec![task1, task2], false, None);
+        let (tasks, events) = simulator.fire::<true>(10);
 
         assert_eq!(tasks, None);
         assert_events_eq(events, vec![]);
@@ -708,14 +491,8 @@ mod tests {
             2,
         );
 
-        let mut simulator = Simulator {
-            tasks: vec![task1, task2],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(10);
+        let mut simulator = Simulator::new(vec![task1, task2], false, None);
+        let (tasks, events) = simulator.fire::<true>(10);
 
         assert_eq!(tasks, None);
         assert_events_eq(
@@ -740,14 +517,8 @@ mod tests {
             1,
             4,
         );
-        let mut simulator = Simulator {
-            tasks: vec![task1],
-            random_execution_time: false,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
-        };
-        let (tasks, events) = simulator.run::<true>(10);
+        let mut simulator = Simulator::new(vec![task1], false, None);
+        let (tasks, events) = simulator.fire::<true>(10);
 
         assert_eq!(tasks, None);
         assert_events_eq(

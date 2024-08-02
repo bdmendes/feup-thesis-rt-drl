@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use self::dqn::{Policy, ReplayMemory};
 use crate::agent::dqn::Transition;
 use crate::ml::tensor::{mean_squared_error, TensorStorage};
@@ -39,17 +42,17 @@ impl SimulatorActionPart {
         }
     }
 
-    pub fn apply(&self, tasks: &mut [SimulatorTask]) {
+    pub fn apply(&self, tasks: &mut Vec<Rc<RefCell<SimulatorTask>>>) {
         if matches!(self, SimulatorActionPart::None) {
             return;
         }
 
         let task_to_change = tasks
             .iter_mut()
-            .find(|t| t.task.props().id == self.task_id())
+            .find(|t| t.borrow().task.props().id == self.task_id())
             .unwrap();
 
-        let amount = (task_to_change.task.props().wcet_h as f32
+        let amount = (task_to_change.borrow().task.props().wcet_h as f32
             * match self {
                 SimulatorActionPart::WcetIncrease(_) => 0.1,
                 SimulatorActionPart::WcetDecrease(_) => 0.05,
@@ -58,12 +61,20 @@ impl SimulatorActionPart {
 
         match self {
             SimulatorActionPart::WcetIncrease(_) => {
-                task_to_change.task.props_mut().wcet_l =
-                    task_to_change.task.props().wcet_l.saturating_add(amount);
+                task_to_change.borrow_mut().task.props_mut().wcet_l = task_to_change
+                    .borrow_mut()
+                    .task
+                    .props()
+                    .wcet_l
+                    .saturating_add(amount);
             }
             SimulatorActionPart::WcetDecrease(_) => {
-                task_to_change.task.props_mut().wcet_l =
-                    task_to_change.task.props().wcet_l.saturating_sub(amount);
+                task_to_change.borrow_mut().task.props_mut().wcet_l = task_to_change
+                    .borrow_mut()
+                    .task
+                    .props()
+                    .wcet_l
+                    .saturating_sub(amount);
             }
             SimulatorActionPart::None => unreachable!(),
         }
@@ -252,7 +263,7 @@ impl SimulatorAgent {
         // If this is not valid, revert the action and ignore it.
         action.iter().for_each(|a| a.apply(&mut simulator.tasks));
         if !matches!(action[0], SimulatorActionPart::None) {
-            if !feasible_schedule_online(&simulator.tasks) {
+            if !feasible_schedule_online(tasks) {
                 println!("Invalid action {:?}, reverting.", action);
                 let reverse_action = action.iter().map(|a| a.reverse()).collect::<Vec<_>>();
                 reverse_action
@@ -404,8 +415,10 @@ impl SimulatorAgent {
     }
 
     fn last_task_execution_time(history: &[SimulatorEvent], id: TaskId) -> Option<TimeUnit> {
+        // FIXME: This is not efficient, and does not take into account preemptions.
+
         let last_end_event_offset = history.iter().rev().position(|e| match e {
-            SimulatorEvent::End(e_id, _) => *e_id == id,
+            SimulatorEvent::End(task, _) => task.borrow().task.props().id == id,
             _ => false,
         });
 
@@ -420,7 +433,7 @@ impl SimulatorAgent {
                     .rev()
                     .skip(last_end_event_offset)
                     .find(|e| match e {
-                        SimulatorEvent::Start(e_id, _) => *e_id == id,
+                        SimulatorEvent::Start(task, _) => task.borrow().task.props().id == id,
                         _ => false,
                     });
             let start_time = match previous_start_event {
@@ -434,12 +447,18 @@ impl SimulatorAgent {
     }
 
     pub fn history_to_input(event_history: &[SimulatorEvent], simulator: &Simulator) -> Tensor {
-        let mut input = Vec::with_capacity(Self::number_of_features(&simulator.tasks));
+        let mut input = Vec::with_capacity(Self::number_of_features(
+            &simulator
+                .tasks
+                .iter()
+                .map(|t| *t.borrow())
+                .collect::<Vec<_>>(),
+        ));
 
         for task in &simulator.tasks {
-            let wcet_l = task.task.props().wcet_l as f32;
+            let wcet_l = task.borrow().task.props().wcet_l as f32;
             let last_job_execution_time = if let Some(diff_time) =
-                Self::last_task_execution_time(event_history, task.task.props().id)
+                Self::last_task_execution_time(event_history, task.borrow().task.props().id)
             {
                 diff_time as f32
             } else {
@@ -458,7 +477,7 @@ impl SimulatorAgent {
             simulator
                 .tasks
                 .iter()
-                .map(|t| t.task.props())
+                .map(|t| t.borrow().task.props())
                 .collect::<Vec<_>>()
                 .as_slice(),
         );
@@ -553,7 +572,7 @@ impl SimulatorAgent {
             simulator
                 .tasks
                 .iter()
-                .map(|t| t.task.props())
+                .map(|t| t.borrow().task.props())
                 .collect::<Vec<_>>()
                 .as_slice(),
         );
@@ -568,7 +587,7 @@ impl SimulatorAgent {
             simulator
                 .tasks
                 .iter()
-                .map(|t| t.task.props())
+                .map(|t| t.borrow().task.props())
                 .collect::<Vec<_>>()
                 .as_slice(),
         );

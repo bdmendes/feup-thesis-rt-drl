@@ -66,7 +66,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
             memory_usage: vec![],
         };
 
-        simulator.run::<false>(test_instants);
+        simulator.fire::<false>(test_instants);
         let mut file = std::fs::File::create("out/placebo.txt").unwrap();
         write_result(&agent.borrow(), &mut file);
     }
@@ -118,7 +118,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                                 elapsed_times: vec![],
                                 memory_usage: vec![],
                             };
-                            simulator.run::<false>(train_instants);
+                            simulator.fire::<false>(train_instants);
                         }
 
                         ////////// Testing //////////
@@ -131,7 +131,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                                 elapsed_times: vec![],
                                 memory_usage: vec![],
                             };
-                            simulator.run::<false>(test_instants);
+                            simulator.fire::<false>(test_instants);
                             let mut file =
                                 std::fs::File::create(format!("out/test_{hyper_iteration}.txt"))
                                     .unwrap();
@@ -191,7 +191,7 @@ fn simulate_placebo(tasks: Vec<SimulatorTask>, secs: usize) -> (usize, usize) {
         memory_usage: vec![],
     };
 
-    simulator.run::<false>(test_instants);
+    simulator.fire::<false>(test_instants);
     let mode_changes_to_hmode = agent.borrow().mode_changes_to_hmode();
     let task_kills = agent.borrow().task_kills();
     (mode_changes_to_hmode, task_kills)
@@ -269,7 +269,7 @@ fn activation_time_size(hidden_sizes: Vec<usize>, set: &[Vec<SimulatorTask>]) {
         elapsed_times: vec![],
         memory_usage: vec![],
     };
-    simulator.run::<false>(Runnable::duration_to_time_unit(Duration::from_secs(2)));
+    simulator.fire::<false>(Runnable::duration_to_time_unit(Duration::from_secs(2)));
 
     // write activation times
     let mut file =

@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use super::{
     task::{Task, TimeUnit},
     SimulatorMode, SimulatorTask,
@@ -10,10 +12,11 @@ pub fn feasible_schedule_design_time(tasks: &[SimulatorTask]) -> bool {
         && feasible_mode_changes::<false>(tasks)
 }
 
-pub fn feasible_schedule_online(tasks: &[SimulatorTask]) -> bool {
+pub fn feasible_schedule_online(tasks: &Vec<Rc<RefCell<SimulatorTask>>>) -> bool {
     // At runtime, we have no "time" to calculate the full recurrence.
     // Therefore, we assume Ri=Ti which is the worst case scenario.
-    feasible_in_mode(tasks, SimulatorMode::LMode) && feasible_mode_changes::<true>(tasks)
+    let tasks = tasks.iter().map(|t| t.borrow().clone()).collect::<Vec<_>>();
+    feasible_in_mode(&tasks, SimulatorMode::LMode) && feasible_mode_changes::<true>(&tasks)
 }
 
 fn response_time(

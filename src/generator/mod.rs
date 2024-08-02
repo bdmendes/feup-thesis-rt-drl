@@ -237,6 +237,7 @@ pub fn generate_tasks(
             priority: period_in_units,
             acet: runnables.iter().map(|r| r.acet).sum(),
             bcet: runnables.iter().map(|r| r.bcet).sum(),
+            next_arrival: offset,
         });
     }
 

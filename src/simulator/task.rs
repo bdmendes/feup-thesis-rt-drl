@@ -15,6 +15,13 @@ pub enum Task {
 }
 
 impl Task {
+    pub fn set_id(&mut self, id: TaskId) {
+        match self {
+            Task::LTask(props) => props.id = id,
+            Task::HTask(props) => props.id = id,
+        }
+    }
+
     pub fn props(&self) -> TaskProps {
         match self {
             Task::LTask(props) => *props,
@@ -85,6 +92,7 @@ pub struct SimulatorTask {
     pub priority: TimeUnit,
     pub acet: TimeUnit, // Average Case Execution Time
     pub bcet: TimeUnit, // Best Case Execution Time
+    pub next_arrival: TimeUnit,
 }
 
 impl SimulatorTask {
@@ -96,6 +104,7 @@ impl SimulatorTask {
             priority: task.props().period, // RMS (Rate Monotonic Scheduling)
             acet,
             bcet,
+            next_arrival: task.props().offset,
         }
     }
 
@@ -106,6 +115,7 @@ impl SimulatorTask {
             priority,
             acet,
             bcet: acet,
+            next_arrival: task.props().offset,
         }
     }
 }
