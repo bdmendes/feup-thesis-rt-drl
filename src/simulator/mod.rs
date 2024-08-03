@@ -10,8 +10,15 @@ use std::{
     time,
 };
 
+pub mod handlers;
 pub mod task;
 pub mod validation;
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum SimulatorJobState {
+    Ready,
+    Running,
+}
 
 #[derive(Debug, Clone)]
 struct SimulatorJob {
@@ -19,6 +26,33 @@ struct SimulatorJob {
     exec_time: TimeUnit,
     run_time: TimeUnit,
     event: Rc<RefCell<SimulatorEvent>>,
+    state: SimulatorJobState,
+    is_agent: bool,
+}
+
+impl PartialEq for SimulatorJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.task.borrow().task.props().id == other.task.borrow().task.props().id
+    }
+}
+
+impl Eq for SimulatorJob {}
+
+impl Ord for SimulatorJob {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.task
+            .borrow()
+            .task
+            .props()
+            .id
+            .cmp(&other.task.borrow().task.props().id)
+    }
+}
+
+impl PartialOrd for SimulatorJob {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -36,18 +70,119 @@ pub enum SimulatorEvent {
 }
 
 impl SimulatorEvent {
+    pub fn task(&self) -> Rc<RefCell<SimulatorTask>> {
+        match self {
+            SimulatorEvent::Start(task, _) | SimulatorEvent::End(task, _) => task.clone(),
+            _ => unimplemented!("should not be called"),
+        }
+    }
+}
+
+impl PartialEq for SimulatorEvent {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (SimulatorEvent::Start(task1, time1), SimulatorEvent::Start(task2, time2))
+            | (SimulatorEvent::End(task1, time1), SimulatorEvent::End(task2, time2))
+            | (SimulatorEvent::TaskKill(task1, time1), SimulatorEvent::TaskKill(task2, time2)) => {
+                task1.borrow().task.props().id == task2.borrow().task.props().id && time1 == time2
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for SimulatorEvent {}
+
+impl Ord for SimulatorEvent {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (SimulatorEvent::Start(_, time1), SimulatorEvent::End(_, time2)) => {
+                if time1 < time2 {
+                    std::cmp::Ordering::Less
+                } else {
+                    // Even if times are equal, we want to prioritize the end event.
+                    std::cmp::Ordering::Greater
+                }
+            }
+            (SimulatorEvent::End(_, time1), SimulatorEvent::Start(_, time2)) => {
+                if time1 > time2 {
+                    std::cmp::Ordering::Greater
+                } else {
+                    // Same as above.
+                    std::cmp::Ordering::Less
+                }
+            }
+            (SimulatorEvent::Start(task1, time1), SimulatorEvent::Start(task2, time2))
+            | (SimulatorEvent::End(task1, time1), SimulatorEvent::End(task2, time2)) => {
+                if time1 < time2 {
+                    std::cmp::Ordering::Less
+                } else if time1 > time2 {
+                    std::cmp::Ordering::Greater
+                } else {
+                    task1
+                        .borrow()
+                        .task
+                        .props()
+                        .id
+                        .cmp(&task2.borrow().task.props().id)
+                }
+            }
+            _ => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
+impl PartialOrd for SimulatorEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl SimulatorEvent {
     pub fn priority(&self, simulator: &Simulator) -> Option<TimeUnit> {
         match self {
             SimulatorEvent::Start(task, time)
             | SimulatorEvent::End(task, time)
             | SimulatorEvent::TaskKill(task, time) => {
                 let task = task.borrow();
-                Some(
-                    time * simulator.tasks.len() as TimeUnit + simulator.tasks.len() as TimeUnit
-                        - task.task.props().id,
-                )
+                if let Some(custom_priority) = task.custom_priority {
+                    // The priority is based on the custom priority.
+                    Some(
+                        time * simulator.tasks.len() as TimeUnit
+                            + simulator.tasks.len() as TimeUnit
+                            - custom_priority,
+                    )
+                } else {
+                    // The priority is based on the task id.
+                    Some(
+                        time * simulator.tasks.len() as TimeUnit
+                            + simulator.tasks.len() as TimeUnit
+                            - task.task.props().id,
+                    )
+                }
             }
             _ => None,
+        }
+    }
+
+    pub fn time(&self) -> TimeUnit {
+        match self {
+            SimulatorEvent::Start(_, time)
+            | SimulatorEvent::End(_, time)
+            | SimulatorEvent::TaskKill(_, time)
+            | SimulatorEvent::ModeChange(_, time) => *time,
+        }
+    }
+
+    pub fn handle(&self, simulator: &mut Simulator) {
+        match self {
+            SimulatorEvent::Start(task, time) => {
+                handlers::handle_start_event(task.clone(), *time, simulator);
+            }
+            SimulatorEvent::End(task, time) => {
+                handlers::handle_end_event(task.clone(), *time, simulator);
+            }
+            _ => unimplemented!("should not be called"),
         }
     }
 }
@@ -56,17 +191,20 @@ pub struct Simulator {
     pub tasks: Vec<Rc<RefCell<SimulatorTask>>>,
     random_execution_time: bool,
     agent: Option<Rc<RefCell<SimulatorAgent>>>,
-    elapsed_times: Vec<time::Duration>,
-    memory_usage: Vec<(usize, usize)>,
+    _elapsed_times: Vec<time::Duration>,
+    _memory_usage: Vec<(usize, usize)>,
 
     // Needed during simulation.
     // Inited during constructor; should not reuse the same simulator for multiple simulations.
     random_source: source::Xorshift128Plus, // TODO: make seed configurable
-    jobs: HashMap<TaskId, SimulatorJob>,    // max 1 job per task
+    jobs: HashMap<TaskId, Rc<RefCell<SimulatorJob>>>, // max 1 job per task
     running_job: Option<Rc<RefCell<SimulatorJob>>>,
     ready_jobs_queue: BinaryHeap<Rc<RefCell<SimulatorJob>>>, // except the one that is currently running
     event_queue: BinaryHeap<Rc<RefCell<SimulatorEvent>>>,    // only start and end events
     event_history: Vec<Rc<RefCell<SimulatorEvent>>>, // all events, used if RETURN_FULL_HISTORY is set
+    last_context_switch: TimeUnit,
+    now: TimeUnit,
+    mode: SimulatorMode,
 }
 
 impl Simulator {
@@ -75,29 +213,37 @@ impl Simulator {
         random_execution_time: bool,
         agent: Option<Rc<RefCell<SimulatorAgent>>>,
     ) -> Self {
-        let tasks = tasks
-            .into_iter()
-            .map(|task| {
-                Rc::new(RefCell::new({
-                    // In the simulator, the task id is used to determine the order of execution (priority).
-                    let mut task = task;
-                    task.task.props_mut().id = task.task.props().id + task.task.props().period;
-                    task
-                }))
-            })
-            .collect::<Vec<_>>();
+        let mut tasks = tasks.clone();
+        let tasks_size = tasks.len();
+        for task in &mut tasks {
+            if let Some(custom_priority) = task.custom_priority {
+                // The priority is based on the custom priority.
+                task.task.props_mut().id = custom_priority;
+            } else {
+                // Default to rate monotonic priority.
+                task.task.props_mut().id =
+                    task.task.props().id + task.task.props().period * tasks_size as TaskId;
+            }
+        }
+
         Self {
-            tasks,
+            tasks: tasks
+                .iter()
+                .map(|t| Rc::new(RefCell::new(t.clone())).clone())
+                .collect(),
             random_execution_time,
-            agent: None,
-            elapsed_times: vec![],
-            memory_usage: vec![],
+            agent,
+            _elapsed_times: vec![],
+            _memory_usage: vec![],
             random_source: source::default(42),
             jobs: HashMap::new(),
             running_job: None,
             ready_jobs_queue: BinaryHeap::new(),
             event_queue: BinaryHeap::new(),
             event_history: vec![],
+            last_context_switch: 0,
+            now: 0,
+            mode: SimulatorMode::LMode,
         }
     }
 
@@ -115,10 +261,34 @@ impl Simulator {
                 exec_time: 0,
                 run_time: 0,
                 event,
+                state: SimulatorJobState::Ready,
+                is_agent: false,
             }));
 
             // Push the job to the ready queue.
             self.ready_jobs_queue.push(job.clone());
+        }
+
+        // TODO: Create job for the H-mode agent.
+        // Should it be a task too?
+    }
+
+    pub fn push_event(&mut self, event: Rc<RefCell<SimulatorEvent>>) {
+        self.event_history.push(event.clone());
+        if self.agent.is_some() {
+            let event_cpy = match &*event.borrow() {
+                SimulatorEvent::Start(task, time) => SimulatorEvent::Start(task.clone(), *time),
+                SimulatorEvent::End(task, time) => SimulatorEvent::End(task.clone(), *time),
+                SimulatorEvent::TaskKill(task, time) => {
+                    SimulatorEvent::TaskKill(task.clone(), *time)
+                }
+                SimulatorEvent::ModeChange(mode, time) => SimulatorEvent::ModeChange(*mode, *time),
+            };
+            self.agent
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .push_event(event_cpy);
         }
     }
 
@@ -126,7 +296,21 @@ impl Simulator {
         &mut self,
         duration: TimeUnit,
     ) -> (Option<Vec<Option<TaskId>>>, Vec<SimulatorEvent>) {
-        (todo!(), self.event_history)
+        self.init_event_queue();
+
+        while self.now < duration {
+            let event = self.event_queue.pop().unwrap();
+            self.now = event.borrow().time();
+            event.borrow().handle(self);
+        }
+
+        (
+            None,
+            self.event_history
+                .iter()
+                .map(|e| e.borrow().clone())
+                .collect(),
+        )
     }
 }
 
@@ -369,9 +553,9 @@ mod tests {
         assert_events_eq(
             events,
             vec![
-                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1)), 1),
-                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1)), 6),
-                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1)), 11),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 1),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 6),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 11),
             ],
         );
     }

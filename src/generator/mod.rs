@@ -234,7 +234,7 @@ pub fn generate_tasks(
         };
         tasks.push(SimulatorTask {
             task,
-            priority: period_in_units,
+            custom_priority: None,
             acet: runnables.iter().map(|r| r.acet).sum(),
             bcet: runnables.iter().map(|r| r.bcet).sum(),
             next_arrival: offset,

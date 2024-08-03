@@ -42,7 +42,7 @@ impl SimulatorActionPart {
         }
     }
 
-    pub fn apply(&self, tasks: &mut Vec<Rc<RefCell<SimulatorTask>>>) {
+    pub fn apply(&self, tasks: &mut [Rc<RefCell<SimulatorTask>>]) {
         if matches!(self, SimulatorActionPart::None) {
             return;
         }
@@ -263,7 +263,7 @@ impl SimulatorAgent {
         // If this is not valid, revert the action and ignore it.
         action.iter().for_each(|a| a.apply(&mut simulator.tasks));
         if !matches!(action[0], SimulatorActionPart::None) {
-            if !feasible_schedule_online(tasks) {
+            if !feasible_schedule_online(&simulator.tasks) {
                 println!("Invalid action {:?}, reverting.", action);
                 let reverse_action = action.iter().map(|a| a.reverse()).collect::<Vec<_>>();
                 reverse_action
@@ -447,13 +447,7 @@ impl SimulatorAgent {
     }
 
     pub fn history_to_input(event_history: &[SimulatorEvent], simulator: &Simulator) -> Tensor {
-        let mut input = Vec::with_capacity(Self::number_of_features(
-            &simulator
-                .tasks
-                .iter()
-                .map(|t| *t.borrow())
-                .collect::<Vec<_>>(),
-        ));
+        let mut input = Vec::with_capacity(Self::number_of_features(&simulator.tasks));
 
         for task in &simulator.tasks {
             let wcet_l = task.borrow().task.props().wcet_l as f32;
@@ -524,7 +518,7 @@ impl SimulatorAgent {
             + 1
     }
 
-    pub fn number_of_features(tasks: &[SimulatorTask]) -> usize {
+    pub fn number_of_features(tasks: &[Rc<RefCell<SimulatorTask>>]) -> usize {
         // We'll place the tasks from task to bottom.
         // Each task has 2 features: WCET_L and last job execution time.
         tasks.len() * 2

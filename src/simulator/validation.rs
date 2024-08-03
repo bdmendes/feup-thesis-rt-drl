@@ -12,7 +12,7 @@ pub fn feasible_schedule_design_time(tasks: &[SimulatorTask]) -> bool {
         && feasible_mode_changes::<false>(tasks)
 }
 
-pub fn feasible_schedule_online(tasks: &Vec<Rc<RefCell<SimulatorTask>>>) -> bool {
+pub fn feasible_schedule_online(tasks: &[Rc<RefCell<SimulatorTask>>]) -> bool {
     // At runtime, we have no "time" to calculate the full recurrence.
     // Therefore, we assume Ri=Ti which is the worst case scenario.
     let tasks = tasks.iter().map(|t| t.borrow().clone()).collect::<Vec<_>>();
@@ -28,7 +28,9 @@ fn response_time(
     let mut response_time = wcet as f32;
 
     for _ in 0..100 {
-        let higher_priority_tasks = tasks.iter().filter(|t| t.priority < task.priority);
+        let higher_priority_tasks = tasks
+            .iter()
+            .filter(|t| t.custom_priority < task.custom_priority);
         let interference = higher_priority_tasks
             .map(|t| {
                 (response_time / t.task.props().period as f32).ceil()
@@ -87,7 +89,7 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
 
     let interference_by_ltasks = tasks
         .iter()
-        .filter(|t| !matches!(t.task, Task::HTask(_)) && t.priority < task.priority)
+        .filter(|t| !matches!(t.task, Task::HTask(_)) && t.custom_priority < task.custom_priority)
         .map(|t| {
             ((response_time(task, tasks, SimulatorMode::LMode).unwrap() as f32)
                 / t.task.props().period as f32)
@@ -99,7 +101,9 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     if APPROXIMATE {
         let interference_by_htasks = tasks
             .iter()
-            .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority < task.priority)
+            .filter(|t| {
+                matches!(t.task, Task::HTask(_)) && t.custom_priority < task.custom_priority
+            })
             .map(|t| {
                 (task.task.props().period as f32 / t.task.props().period as f32).ceil() as TimeUnit
                     * t.task.props().wcet_in_mode(SimulatorMode::HMode)
@@ -118,7 +122,9 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     for _ in 0..100 {
         let interference_by_htasks = tasks
             .iter()
-            .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority < task.priority)
+            .filter(|t| {
+                matches!(t.task, Task::HTask(_)) && t.custom_priority < task.custom_priority
+            })
             .map(|t| {
                 (total_response_time as f32 / t.task.props().period as f32).ceil() as TimeUnit
                     * t.task.props().wcet_in_mode(SimulatorMode::HMode)
