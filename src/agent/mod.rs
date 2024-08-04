@@ -418,13 +418,13 @@ impl SimulatorAgent {
         // FIXME: This is not efficient, and does not take into account preemptions.
 
         let last_end_event_offset = history.iter().rev().position(|e| match e {
-            SimulatorEvent::End(task, _) => task.borrow().task.props().id == id,
+            SimulatorEvent::End(task, _, _) => task.borrow().task.props().id == id,
             _ => false,
         });
 
         if let Some(last_end_event_offset) = last_end_event_offset {
             let end_time = match history.iter().rev().nth(last_end_event_offset).unwrap() {
-                SimulatorEvent::End(_, time) => time,
+                SimulatorEvent::End(_, time, _) => time,
                 _ => unreachable!(),
             };
             let previous_start_event =

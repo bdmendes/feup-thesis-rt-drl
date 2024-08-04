@@ -1,5 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
+use crate::simulator::EndReason;
+
 use super::{
     task::{SimulatorTask, Task, TimeUnit},
     Simulator, SimulatorEvent, SimulatorJob, SimulatorJobState, SimulatorMode,
@@ -62,6 +64,7 @@ pub fn handle_start_event(
 pub fn handle_end_event(
     task: Rc<RefCell<SimulatorTask>>,
     time: TimeUnit,
+    reason: EndReason,
     simulator: &mut Simulator,
 ) {
     let job = simulator.jobs.get(&task.borrow().task.props().id).unwrap();
@@ -87,9 +90,7 @@ pub fn handle_end_event(
     simulator.running_job = None;
 
     // Budget exceedance handling
-    if simulator.mode == SimulatorMode::LMode
-        && job.borrow().run_time >= job.borrow().task.borrow().task.props().wcet_l
-    {
+    if matches!(reason, EndReason::BudgetExceedance) {
         let is_ltask = matches!(job.borrow().task.borrow().task, Task::LTask(_));
 
         if is_ltask {
@@ -168,17 +169,24 @@ fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 }
 
 fn schedule_termination_event(job: &mut SimulatorJob, simulator: &mut Simulator) {
-    let termination_time = if simulator.mode == SimulatorMode::LMode
+    let (termination_time, reason) = if simulator.mode == SimulatorMode::LMode
         && job.exec_time > job.task.borrow().task.props().wcet_l
     {
-        simulator.now + job.task.borrow().task.props().wcet_l - job.run_time
+        (
+            simulator.now + job.task.borrow().task.props().wcet_l - job.run_time,
+            EndReason::BudgetExceedance,
+        )
     } else {
-        simulator.now + job.exec_time - job.run_time
+        (
+            simulator.now + job.exec_time - job.run_time,
+            EndReason::JobCompletion,
+        )
     };
 
     let event = Rc::new(RefCell::new(SimulatorEvent::End(
         job.task.clone(),
         termination_time,
+        reason,
     )));
 
     job.event = event.clone();
@@ -198,6 +206,7 @@ fn change_mode(to_mode: SimulatorMode, simulator: &mut Simulator) {
 
     if simulator.mode == SimulatorMode::LMode {
         // Schedule the arrival of L-tasks.
+        println!("Scheduling L-tasks");
         for task in simulator.tasks.iter() {
             if let Task::LTask(_) = task.borrow().task {
                 let start_event = Rc::new(RefCell::new(SimulatorEvent::Start(
@@ -213,11 +222,12 @@ fn change_mode(to_mode: SimulatorMode, simulator: &mut Simulator) {
         }
     } else {
         // Dispense with the remaining L-tasks.
+        println!("Dispensing with L-tasks");
         simulator
             .event_queue
-            .retain(|event| !matches!(event.borrow().task().borrow().task, Task::LTask(_)));
+            .retain(|event| matches!(event.borrow().task().borrow().task, Task::HTask(_)));
         simulator
             .ready_jobs_queue
-            .retain(|job| !matches!(job.borrow().task.borrow().task, Task::LTask(_)));
+            .retain(|job| matches!(job.borrow().task.borrow().task, Task::HTask(_)));
     }
 }

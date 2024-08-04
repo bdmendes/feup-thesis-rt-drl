@@ -82,10 +82,16 @@ pub enum SimulatorMode {
     HMode,
 }
 
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum EndReason {
+    JobCompletion,
+    BudgetExceedance,
+}
+
 #[derive(Debug, Clone)]
 pub enum SimulatorEvent {
     Start(Rc<RefCell<SimulatorTask>>, TimeUnit),
-    End(Rc<RefCell<SimulatorTask>>, TimeUnit),
+    End(Rc<RefCell<SimulatorTask>>, TimeUnit, EndReason),
     TaskKill(Rc<RefCell<SimulatorTask>>, TimeUnit),
     ModeChange(SimulatorMode, TimeUnit),
 }
@@ -93,7 +99,7 @@ pub enum SimulatorEvent {
 impl SimulatorEvent {
     pub fn task(&self) -> Rc<RefCell<SimulatorTask>> {
         match self {
-            SimulatorEvent::Start(task, _) | SimulatorEvent::End(task, _) => task.clone(),
+            SimulatorEvent::Start(task, _) | SimulatorEvent::End(task, _, _) => task.clone(),
             _ => unimplemented!("should not be called"),
         }
     }
@@ -103,7 +109,7 @@ impl PartialEq for SimulatorEvent {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (SimulatorEvent::Start(task1, time1), SimulatorEvent::Start(task2, time2))
-            | (SimulatorEvent::End(task1, time1), SimulatorEvent::End(task2, time2))
+            | (SimulatorEvent::End(task1, time1, _), SimulatorEvent::End(task2, time2, _))
             | (SimulatorEvent::TaskKill(task1, time1), SimulatorEvent::TaskKill(task2, time2)) => {
                 task1.borrow().task.props().id == task2.borrow().task.props().id && time1 == time2
             }
@@ -117,7 +123,7 @@ impl Eq for SimulatorEvent {}
 impl Ord for SimulatorEvent {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
-            (SimulatorEvent::Start(_, time1), SimulatorEvent::End(_, time2)) => {
+            (SimulatorEvent::Start(_, time1), SimulatorEvent::End(_, time2, _)) => {
                 if time1 < time2 {
                     std::cmp::Ordering::Greater
                 } else {
@@ -125,7 +131,7 @@ impl Ord for SimulatorEvent {
                     std::cmp::Ordering::Less
                 }
             }
-            (SimulatorEvent::End(_, time1), SimulatorEvent::Start(_, time2)) => {
+            (SimulatorEvent::End(_, time1, _), SimulatorEvent::Start(_, time2)) => {
                 if time1 > time2 {
                     std::cmp::Ordering::Less
                 } else {
@@ -134,7 +140,8 @@ impl Ord for SimulatorEvent {
                 }
             }
             (SimulatorEvent::Start(task1, time1), SimulatorEvent::Start(task2, time2))
-            | (SimulatorEvent::End(task1, time1), SimulatorEvent::End(task2, time2)) => {
+            | (SimulatorEvent::End(task1, time1, _), SimulatorEvent::End(task2, time2, _)) =>
+            {
                 #[allow(clippy::comparison_chain)]
                 if time1 < time2 {
                     std::cmp::Ordering::Greater
@@ -165,7 +172,7 @@ impl SimulatorEvent {
     pub fn priority(&self, simulator: &Simulator) -> Option<TimeUnit> {
         match self {
             SimulatorEvent::Start(task, time)
-            | SimulatorEvent::End(task, time)
+            | SimulatorEvent::End(task, time, _)
             | SimulatorEvent::TaskKill(task, time) => {
                 let task = task.borrow();
                 if let Some(custom_priority) = task.custom_priority {
@@ -191,7 +198,7 @@ impl SimulatorEvent {
     pub fn time(&self) -> TimeUnit {
         match self {
             SimulatorEvent::Start(_, time)
-            | SimulatorEvent::End(_, time)
+            | SimulatorEvent::End(_, time, _)
             | SimulatorEvent::TaskKill(_, time)
             | SimulatorEvent::ModeChange(_, time) => *time,
         }
@@ -202,8 +209,8 @@ impl SimulatorEvent {
             SimulatorEvent::Start(task, time) => {
                 handlers::handle_start_event(task.clone(), *time, simulator);
             }
-            SimulatorEvent::End(task, time) => {
-                handlers::handle_end_event(task.clone(), *time, simulator);
+            SimulatorEvent::End(task, time, reason) => {
+                handlers::handle_end_event(task.clone(), *time, *reason, simulator);
             }
             _ => unimplemented!("should not be called"),
         }
@@ -336,7 +343,9 @@ impl Simulator {
         if self.agent.is_some() {
             let event_cpy = match &*event.borrow() {
                 SimulatorEvent::Start(task, time) => SimulatorEvent::Start(task.clone(), *time),
-                SimulatorEvent::End(task, time) => SimulatorEvent::End(task.clone(), *time),
+                SimulatorEvent::End(task, time, reason) => {
+                    SimulatorEvent::End(task.clone(), *time, *reason)
+                }
                 SimulatorEvent::TaskKill(task, time) => {
                     SimulatorEvent::TaskKill(task.clone(), *time)
                 }
@@ -425,7 +434,12 @@ mod tests {
     fn assert_events_eq(events: Vec<SimulatorEvent>, expected: Vec<SimulatorEvent>) {
         let events_with_stripped_start_end = events
             .iter()
-            .filter(|e| !matches!(e, SimulatorEvent::Start(_, _) | SimulatorEvent::End(_, _)))
+            .filter(|e| {
+                !matches!(
+                    e,
+                    SimulatorEvent::Start(_, _) | SimulatorEvent::End(_, _, _)
+                )
+            })
             .cloned()
             .collect::<Vec<_>>();
         for (event, expected) in events_with_stripped_start_end.iter().zip(expected.iter()) {
@@ -653,9 +667,9 @@ mod tests {
         assert_events_eq(
             events,
             vec![
-                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 1),
-                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 6),
-                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 11),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 2),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 7),
+                SimulatorEvent::TaskKill(Rc::new(RefCell::new(task1.clone())), 12),
             ],
         );
     }
@@ -693,13 +707,13 @@ mod tests {
             vec![
                 Some(1),
                 Some(1),
-                Some(1),
+                Some(2),
+                Some(2),
                 None,
-                None,
                 Some(1),
                 Some(1),
-                Some(1),
-                None,
+                Some(2),
+                Some(2),
                 None,
                 Some(1),
                 Some(1),
@@ -709,11 +723,12 @@ mod tests {
         assert_events_eq(
             events,
             vec![
-                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 1),
-                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 3),
-                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 6),
-                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 8),
-                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 11),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 2),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 2),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 7),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 7),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::HMode, 12),
+                SimulatorEvent::ModeChange(crate::simulator::SimulatorMode::LMode, 12),
             ],
         );
     }
