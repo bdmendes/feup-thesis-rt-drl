@@ -4,7 +4,7 @@ use crate::simulator::EndReason;
 
 use super::{
     task::{SimulatorTask, Task, TimeUnit},
-    Simulator, SimulatorEvent, SimulatorJob, SimulatorJobState, SimulatorMode,
+    Simulator, SimulatorEvent, SimulatorJob, SimulatorMode,
 };
 
 pub fn handle_start_event(
@@ -135,9 +135,6 @@ fn run_job(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 
 fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
     if let Some(running_job) = &simulator.running_job {
-        // Change the state of the running_job (this is the preempted job) to READY
-        running_job.borrow_mut().state = SimulatorJobState::Ready;
-
         // Cancel the termination event of the running_job (in the event queue)
         simulator.event_queue.retain(|event| {
             event.borrow().task().borrow().task.props().id
@@ -154,9 +151,6 @@ fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
             running_job.borrow().real_id()
         );
     }
-
-    // Change the state of the newly arrived job to RUNNING
-    job.borrow_mut().state = SimulatorJobState::Running;
 
     // Schedule the termination event for this job (in the event queue)
     schedule_termination_event(&mut job.borrow_mut(), simulator);

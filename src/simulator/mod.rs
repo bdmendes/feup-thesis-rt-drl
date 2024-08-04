@@ -16,19 +16,12 @@ pub mod validation;
 
 const MAX_TASKS_SIZE: usize = 1000;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub enum SimulatorJobState {
-    Ready,
-    Running,
-}
-
 #[derive(Debug, Clone)]
 struct SimulatorJob {
     task: Rc<RefCell<SimulatorTask>>,
     exec_time: TimeUnit,
     run_time: TimeUnit,
     event: Rc<RefCell<SimulatorEvent>>,
-    state: SimulatorJobState,
     is_agent: bool,
 }
 
@@ -296,7 +289,6 @@ impl Simulator {
                 exec_time: 0,
                 run_time: 0,
                 event,
-                state: SimulatorJobState::Ready,
                 is_agent: false,
             }));
 
@@ -329,7 +321,6 @@ impl Simulator {
                 exec_time: 0,
                 run_time: 0,
                 event,
-                state: SimulatorJobState::Ready,
                 is_agent: true,
             }));
 
