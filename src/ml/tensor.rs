@@ -7,22 +7,6 @@ pub struct TensorStorage {
     values: Vec<Tensor>,
 }
 
-impl ToString for TensorStorage {
-    fn to_string(&self) -> String {
-        self.values
-            .iter()
-            .map(|t| {
-                if t.requires_grad() {
-                    format!("{:?} ", t.size())
-                } else {
-                    "".to_string()
-                }
-            })
-            .reduce(|acc, s| acc + &s)
-            .unwrap_or("".to_string())
-    }
-}
-
 impl TensorStorage {
     pub fn copy(&mut self, source_storage: &TensorStorage) {
         self.values = source_storage

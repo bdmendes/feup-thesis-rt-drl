@@ -59,8 +59,8 @@ impl Policy {
 
     pub fn free(&mut self, storage: &mut TensorStorage) {
         self.layers.iter().for_each(|l| {
-            storage.free_at(*l.params.get(&"W".to_string()).unwrap());
-            storage.free_at(*l.params.get(&"b".to_string()).unwrap());
+            storage.free_at(*l.params.get("W").unwrap());
+            storage.free_at(*l.params.get("b").unwrap());
         });
         self.freed = true;
     }
