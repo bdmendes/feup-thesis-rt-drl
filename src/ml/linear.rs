@@ -16,18 +16,18 @@ impl LinearLayer {
     }
 
     pub fn weights<'a>(&self, mem: &'a TensorStorage) -> &'a Tensor {
-        mem.get(*self.params.get(&"W".to_string()).unwrap())
+        mem.get(*self.params.get("W").unwrap())
     }
 
     pub fn bias<'a>(&self, mem: &'a TensorStorage) -> &'a Tensor {
-        mem.get(*self.params.get(&"b".to_string()).unwrap())
+        mem.get(*self.params.get("b").unwrap())
     }
 }
 
 impl ComputeModel for LinearLayer {
     fn forward(&self, mem: &TensorStorage, input: &Tensor) -> Tensor {
-        let w = mem.get(*self.params.get(&"W".to_string()).unwrap());
-        let b = mem.get(*self.params.get(&"b".to_string()).unwrap());
+        let w = mem.get(*self.params.get("W").unwrap());
+        let b = mem.get(*self.params.get("b").unwrap());
         input.matmul(w) + b
     }
 }

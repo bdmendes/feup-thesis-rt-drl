@@ -15,6 +15,13 @@ pub enum Task {
 }
 
 impl Task {
+    pub fn set_id(&mut self, id: TaskId) {
+        match self {
+            Task::LTask(props) => props.id = id,
+            Task::HTask(props) => props.id = id,
+        }
+    }
+
     pub fn props(&self) -> TaskProps {
         match self {
             Task::LTask(props) => *props,
@@ -82,9 +89,10 @@ impl TaskProps {
 #[derive(Clone, Debug)]
 pub struct SimulatorTask {
     pub task: Task,
-    pub priority: TimeUnit,
+    pub custom_priority: Option<u64>,
     pub acet: TimeUnit, // Average Case Execution Time
     pub bcet: TimeUnit, // Best Case Execution Time
+    pub next_arrival: TimeUnit,
 }
 
 impl SimulatorTask {
@@ -93,9 +101,10 @@ impl SimulatorTask {
         assert!(bcet > 0, "Execution time must be greater than 0.");
         Self {
             task: task.clone(),
-            priority: task.props().period, // RMS (Rate Monotonic Scheduling)
+            custom_priority: None,
             acet,
             bcet,
+            next_arrival: task.props().offset,
         }
     }
 
@@ -103,9 +112,10 @@ impl SimulatorTask {
         assert!(acet > 0, "Execution time must be greater than 0.");
         Self {
             task: task.clone(),
-            priority,
+            custom_priority: Some(priority),
             acet,
             bcet: acet,
+            next_arrival: task.props().offset,
         }
     }
 }
