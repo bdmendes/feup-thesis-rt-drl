@@ -11,7 +11,7 @@ use std::{
     io::Write,
     rc::Rc,
     sync::{Arc, Mutex},
-    thread,
+    thread::{self, sleep},
     time::Duration,
 };
 
@@ -170,8 +170,17 @@ fn simulate_placebo(tasks: Vec<SimulatorTask>, secs: usize) -> (usize, usize) {
 
 pub fn hp_tuning() {
     std::fs::create_dir_all("out").unwrap();
-    let set = generate_sets(1, 25);
-    tune(set[0].clone());
+    loop {
+        let set = generate_sets(1, 75);
+        if feasible_schedule_design_time(&set[0]) {
+            println!("Feasible schedule found, tuning hyperparameters...");
+            sleep(Duration::from_millis(100));
+            tune(set[0].clone());
+            return;
+        }
+        println!("Infeasible schedule, retrying...\n");
+        sleep(Duration::from_millis(100));
+    }
 }
 
 pub fn placebo() {
@@ -273,7 +282,7 @@ pub fn activation_time() {
 }
 
 pub fn testing_fast() {
-    let tasks = generate_tasks(0.7, 50, generator::TimeSampleDistribution::Pert);
+    let tasks = generate_tasks(0.3, 80, generator::TimeSampleDistribution::Pert);
     assert!(feasible_schedule_design_time(&tasks));
     let mut simulator = Simulator::new(
         tasks.clone(),
@@ -291,6 +300,32 @@ pub fn testing_fast() {
         )))),
     );
     simulator.fire::<false>(Runnable::duration_to_time_unit(Duration::from_secs(10)));
+    println!(
+        "Cumulative reward: {}",
+        simulator
+            .agent
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .cumulative_reward()
+    );
+    println!(
+        "Task kills: {}",
+        simulator.agent.as_ref().unwrap().borrow().task_kills()
+    );
+    println!(
+        "Mode changes to H: {}",
+        simulator
+            .agent
+            .as_ref()
+            .unwrap()
+            .borrow()
+            .mode_changes_to_hmode()
+    );
+    println!(
+        "Task starts: {}",
+        simulator.agent.as_ref().unwrap().borrow().task_starts()
+    );
 }
 
 fn main() {
