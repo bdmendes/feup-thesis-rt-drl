@@ -12,6 +12,11 @@ pub fn handle_start_event(
     time: TimeUnit,
     simulator: &mut Simulator,
 ) {
+    simulator.push_event(Rc::new(RefCell::new(SimulatorEvent::Start(
+        task.clone(),
+        time,
+    ))));
+
     // Update the time of the next arrival
     let period = task.borrow().task.props().period;
     task.borrow_mut().next_arrival += period;
@@ -20,9 +25,16 @@ pub fn handle_start_event(
     let job = simulator.jobs.get(&task.borrow().task.props().id).unwrap();
     println!(
         "Handling start event for task: {}; instant: {}",
-        job.borrow().real_id(),
+        job.borrow().task.borrow().task.props().id,
         time
     );
+    if job.borrow().is_agent {
+        println!(
+            "Scheduling agent at instant: {}, id: {}",
+            time,
+            job.borrow().task.borrow().task.props().id
+        );
+    }
     let next_exec_time = if simulator.random_execution_time {
         Task::sample_execution_time(
             task.borrow().acet,
@@ -56,7 +68,7 @@ pub fn handle_start_event(
         simulator.ready_jobs_queue.push(job.clone());
         println!(
             "Pushed job to ready queue at start: {}",
-            job.borrow().real_id()
+            job.borrow().task.borrow().task.props().id
         );
     }
 }
@@ -67,10 +79,16 @@ pub fn handle_end_event(
     reason: EndReason,
     simulator: &mut Simulator,
 ) {
+    simulator.push_event(Rc::new(RefCell::new(SimulatorEvent::End(
+        task.clone(),
+        time,
+        reason,
+    ))));
+
     let job = simulator.jobs.get(&task.borrow().task.props().id).unwrap();
     println!(
         "Handling end event for task: {}; instant: {}",
-        job.borrow().real_id(),
+        job.borrow().task.borrow().task.props().id,
         time
     );
 
@@ -80,7 +98,10 @@ pub fn handle_end_event(
         std::cmp::max(simulator.now, task.borrow().next_arrival),
     )));
     simulator.event_queue.push(new_start_event.clone());
-    println!("Pushed start event for task: {}", job.borrow().real_id());
+    println!(
+        "Pushed start event for task: {}",
+        job.borrow().task.borrow().task.props().id
+    );
     job.borrow_mut().event = new_start_event;
 
     // Update runtime
@@ -111,7 +132,10 @@ pub fn handle_end_event(
         }
     } else {
         let job = simulator.ready_jobs_queue.pop().unwrap();
-        println!("Popped job from ready queue: {}", job.borrow().real_id());
+        println!(
+            "Popped job from ready queue: {}",
+            job.borrow().task.borrow().task.props().id
+        );
         run_job(job, simulator);
     }
 }
@@ -129,7 +153,10 @@ fn run_job(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
         simulator.agent = Some(agent);
     }
 
-    println!("Running job: {}", job.borrow().real_id());
+    println!(
+        "Running job: {}",
+        job.borrow().task.borrow().task.props().id
+    );
     context_switch(job, simulator);
 }
 
@@ -148,7 +175,7 @@ fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
         simulator.ready_jobs_queue.push(running_job.clone());
         println!(
             "Pushed job to ready queue at context switch: {}",
-            running_job.borrow().real_id()
+            running_job.borrow().task.borrow().task.props().id
         );
     }
 
@@ -157,7 +184,10 @@ fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 
     // Update the running job to the newly arrived job
     simulator.running_job = Some(job.clone());
-    println!("Context switch to job: {}", job.borrow().real_id());
+    println!(
+        "Context switch to job: {}",
+        job.borrow().task.borrow().task.props().id
+    );
 
     simulator.last_context_switch = simulator.now;
 }
@@ -186,7 +216,10 @@ fn schedule_termination_event(job: &mut SimulatorJob, simulator: &mut Simulator)
     job.event = event.clone();
 
     simulator.event_queue.push(event);
-    println!("Pushed end event for job: {}", job.real_id());
+    println!(
+        "Pushed end event for job: {}",
+        job.task.borrow().task.props().id
+    );
 }
 
 fn change_mode(to_mode: SimulatorMode, simulator: &mut Simulator) {

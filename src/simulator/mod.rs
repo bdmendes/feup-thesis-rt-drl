@@ -25,24 +25,6 @@ struct SimulatorJob {
     is_agent: bool,
 }
 
-impl SimulatorJob {
-    // As the id is changed to accomodate priorities, we need to return the real id for debugging purposes.
-    pub fn real_id(&self) -> TaskId {
-        let task = self.task.borrow();
-        if let Some(custom_priority) = task.custom_priority {
-            // The priority is based on the custom priority.
-            task.task.props().id
-                - custom_priority * MAX_TASKS_SIZE as TaskId
-                - MAX_TASKS_SIZE as TaskId
-        } else {
-            // Default to rate monotonic priority.
-            task.task.props().id
-                - task.task.props().period * MAX_TASKS_SIZE as TaskId
-                - MAX_TASKS_SIZE as TaskId
-        }
-    }
-}
-
 impl PartialEq for SimulatorJob {
     fn eq(&self, other: &Self) -> bool {
         self.task.borrow().task.props().id == other.task.borrow().task.props().id
@@ -162,32 +144,6 @@ impl PartialOrd for SimulatorEvent {
 }
 
 impl SimulatorEvent {
-    pub fn priority(&self, simulator: &Simulator) -> Option<TimeUnit> {
-        match self {
-            SimulatorEvent::Start(task, time)
-            | SimulatorEvent::End(task, time, _)
-            | SimulatorEvent::TaskKill(task, time) => {
-                let task = task.borrow();
-                if let Some(custom_priority) = task.custom_priority {
-                    // The priority is based on the custom priority.
-                    Some(
-                        time * simulator.tasks.len() as TimeUnit
-                            + simulator.tasks.len() as TimeUnit
-                            - custom_priority,
-                    )
-                } else {
-                    // The priority is based on the task id.
-                    Some(
-                        time * simulator.tasks.len() as TimeUnit
-                            + simulator.tasks.len() as TimeUnit
-                            - task.task.props().id,
-                    )
-                }
-            }
-            _ => None,
-        }
-    }
-
     pub fn time(&self) -> TimeUnit {
         match self {
             SimulatorEvent::Start(_, time)
@@ -212,10 +168,10 @@ impl SimulatorEvent {
 
 pub struct Simulator {
     pub tasks: Vec<Rc<RefCell<SimulatorTask>>>,
-    random_execution_time: bool,
-    agent: Option<Rc<RefCell<SimulatorAgent>>>,
-    _elapsed_times: Vec<time::Duration>,
-    _memory_usage: Vec<(usize, usize)>,
+    pub random_execution_time: bool,
+    pub agent: Option<Rc<RefCell<SimulatorAgent>>>,
+    pub elapsed_times: Vec<time::Duration>,
+    pub memory_usage: Vec<(usize, usize)>,
 
     // Needed during simulation.
     // Inited during constructor; should not reuse the same simulator for multiple simulations.
@@ -228,39 +184,37 @@ pub struct Simulator {
     last_context_switch: TimeUnit,
     now: TimeUnit,
     mode: SimulatorMode,
-    running_history: Vec<Option<TaskId>>, // used if we want to return the full history
+    running_history: Vec<Option<Rc<RefCell<SimulatorTask>>>>, // used if we want to return the full history
 }
 
 impl Simulator {
     pub fn new(
-        tasks: Vec<SimulatorTask>,
+        mut tasks: Vec<SimulatorTask>,
         random_execution_time: bool,
         agent: Option<Rc<RefCell<SimulatorAgent>>>,
     ) -> Self {
-        let mut tasks = tasks.clone();
         for task in &mut tasks {
             if let Some(custom_priority) = task.custom_priority {
                 // The priority is based on the custom priority.
-                task.task.props_mut().id = custom_priority * MAX_TASKS_SIZE as TaskId
-                    + MAX_TASKS_SIZE as TaskId
-                    + task.task.props().id;
+                task.task.props_mut().id =
+                    custom_priority * MAX_TASKS_SIZE as TaskId + task.task.props().id;
             } else {
                 // Default to rate monotonic priority.
-                task.task.props_mut().id = task.task.props().id
-                    + task.task.props().period * MAX_TASKS_SIZE as TaskId
-                    + MAX_TASKS_SIZE as TaskId;
+                task.task.props_mut().id =
+                    task.task.props().id + task.task.props().period * MAX_TASKS_SIZE as TaskId;
+                println!("Task id: {}", task.task.props().id);
             }
         }
 
         Self {
             tasks: tasks
                 .iter()
-                .map(|t| Rc::new(RefCell::new(t.clone())).clone())
+                .map(|t| Rc::new(RefCell::new(t.clone())))
                 .collect(),
             random_execution_time,
             agent,
-            _elapsed_times: vec![],
-            _memory_usage: vec![],
+            elapsed_times: vec![],
+            memory_usage: vec![],
             random_source: source::default(42),
             jobs: HashMap::new(),
             running_job: None,
@@ -297,17 +251,24 @@ impl Simulator {
         }
 
         if self.agent.is_some() {
+            let max_id = self
+                .tasks
+                .iter()
+                .map(|t| t.borrow().task.props().id)
+                .max()
+                .unwrap();
+
             // Create a task for the agent.
-            let task = Rc::new(RefCell::new(SimulatorTask::new_with_custom_priority(
+            let task = Rc::new(RefCell::new(SimulatorTask::new(
                 task::Task::HTask(TaskProps {
-                    id: self.tasks.len() as TaskId + 1,
-                    wcet_l: 0,
-                    wcet_h: Runnable::duration_to_time_unit(time::Duration::from_micros(1)),
+                    id: max_id + 1,
+                    wcet_l: Runnable::duration_to_time_unit(time::Duration::from_millis(1)),
+                    wcet_h: Runnable::duration_to_time_unit(time::Duration::from_millis(2)),
                     offset: 0,
-                    period: Runnable::duration_to_time_unit(time::Duration::from_micros(10)),
+                    period: Runnable::duration_to_time_unit(time::Duration::from_millis(10)),
                 }),
-                self.tasks.len() as TaskId + 1,
-                self.tasks.len() as TaskId + 1,
+                Runnable::duration_to_time_unit(time::Duration::from_micros(500)),
+                Runnable::duration_to_time_unit(time::Duration::from_micros(250)),
             )));
             self.tasks.push(task.clone());
 
@@ -351,14 +312,13 @@ impl Simulator {
     }
 
     fn change_back_task_ids(&mut self) {
-        // Change the task ids back to their original values.
         for task in &self.tasks {
-            let real_id = self
-                .jobs
-                .get(&task.borrow().task.props().id)
-                .unwrap()
-                .borrow()
-                .real_id();
+            let real_id = if let Some(custom_priority) = task.borrow().custom_priority {
+                task.borrow().task.props().id - custom_priority * MAX_TASKS_SIZE as TaskId
+            } else {
+                task.borrow().task.props().id
+                    - task.borrow().task.props().period * MAX_TASKS_SIZE as TaskId
+            };
             task.borrow_mut().task.props_mut().id = real_id;
         }
     }
@@ -372,29 +332,25 @@ impl Simulator {
         while self.now < duration {
             println!("------------------");
             println!(
-                "instant: {}; events in queue: {}; ready jobs queue: {:?}\n",
+                "instant: {}; events in queue: {}; ready jobs queue: {:?}",
                 self.event_queue.peek().unwrap().borrow().time(),
                 self.event_queue.len(),
                 self.ready_jobs_queue
                     .iter()
-                    .map(|j| j.borrow().real_id())
+                    .map(|j| j.borrow().task.borrow().task.props().id)
                     .collect::<Vec<_>>()
             );
-            for event in &self.event_queue {
-                println!(
-                    "event: {:?} at instant: {}",
-                    event.borrow(),
-                    event.borrow().time()
-                );
-            }
 
             let event = self.event_queue.pop().unwrap();
-            println!("\nPopped event: {:?}", event.borrow());
+            println!("Popped event: {:?}", event.borrow());
 
             if RETURN_FULL_HISTORY {
                 for _ in self.now..(event.borrow().time()) {
-                    self.running_history
-                        .push(self.running_job.as_ref().map(|job| job.borrow().real_id()));
+                    self.running_history.push(
+                        self.running_job
+                            .as_ref()
+                            .map(|job| job.borrow().task.clone()),
+                    );
                 }
             }
 
@@ -405,7 +361,10 @@ impl Simulator {
         self.change_back_task_ids();
 
         (
-            self.running_history.clone(),
+            self.running_history
+                .iter()
+                .map(|t| t.as_ref().map(|t| t.borrow().task.props().id))
+                .collect(),
             self.event_history
                 .iter()
                 .map(|e| e.borrow().clone())

@@ -59,22 +59,13 @@ impl SimulatorActionPart {
                 _ => unreachable!(),
             }) as TimeUnit;
 
+        let wcet_l = task_to_change.borrow_mut().task.props().wcet_l;
         match self {
             SimulatorActionPart::WcetIncrease(_) => {
-                task_to_change.borrow_mut().task.props_mut().wcet_l = task_to_change
-                    .borrow_mut()
-                    .task
-                    .props()
-                    .wcet_l
-                    .saturating_add(amount);
+                task_to_change.borrow_mut().task.props_mut().wcet_l = wcet_l.saturating_add(amount);
             }
             SimulatorActionPart::WcetDecrease(_) => {
-                task_to_change.borrow_mut().task.props_mut().wcet_l = task_to_change
-                    .borrow_mut()
-                    .task
-                    .props()
-                    .wcet_l
-                    .saturating_sub(amount);
+                task_to_change.borrow_mut().task.props_mut().wcet_l = wcet_l.saturating_sub(amount);
             }
             SimulatorActionPart::None => unreachable!(),
         }
@@ -118,6 +109,9 @@ pub struct SimulatorAgent {
     task_starts: usize,
     last_processed_event_index: usize,
     track: bool,
+    number_of_features: usize,
+    _number_of_actions: usize,
+    number_of_tasks: usize,
 
     // DQN parameters.
     sample_batch_size: usize,
@@ -160,9 +154,11 @@ impl SimulatorAgent {
         hidden_sizes: Vec<usize>,
         sample_batch_size: usize,
         activation: dqn::ActivationFunction,
-        number_of_actions: usize,
-        number_of_features: usize,
+        task_set: &[SimulatorTask],
     ) -> Self {
+        let number_of_features = Self::number_of_features(task_set);
+        let number_of_actions = Self::number_of_actions(task_set);
+
         let replay_memory = ReplayMemory::new(mem_size, min_mem_size);
         let mut memory_policy = TensorStorage::default();
         let policy_network = Policy::new(
@@ -205,6 +201,9 @@ impl SimulatorAgent {
             task_kills: 0,
             task_starts: 0,
             last_processed_event_index: 0,
+            number_of_features,
+            _number_of_actions: number_of_actions,
+            number_of_tasks: task_set.len(),
         }
     }
 
@@ -243,19 +242,20 @@ impl SimulatorAgent {
         println!("\nActivating agent.");
 
         // Build a state tensor from the simulator's state.
-        let state = Self::history_to_input(&self.events_history, simulator);
+        let state = Self::history_to_input(self, &self.events_history, simulator);
 
         // Get a new action from the policy.
         let action = match self.stage {
             SimulatorAgentStage::Placebo => vec![SimulatorActionPart::None],
-            _ => Self::epsilon_greedy(
-                &self.memory_policy,
-                &self.policy_network,
-                self.epsilon,
-                &state,
-                simulator,
-            )
-            .map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]),
+            _ => self
+                .epsilon_greedy(
+                    &self.memory_policy,
+                    &self.policy_network,
+                    self.epsilon,
+                    &state,
+                    simulator,
+                )
+                .map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]),
         };
         println!("Got action: {:?}", action);
 
@@ -316,7 +316,7 @@ impl SimulatorAgent {
             // We had taken an action previously, and are now receiving the reward.
             let transition = Transition::new(
                 self.buffered_state.as_ref().unwrap(),
-                Self::action_to_index(Some(buffered_action), simulator) as i64,
+                self.action_to_index(Some(buffered_action), simulator) as i64,
                 reward as f32,
                 &state,
             );
@@ -358,7 +358,6 @@ impl SimulatorAgent {
             .policy_network
             .forward(&self.memory_policy, &b_state)
             .gather(1, &b_action, false);
-
         let target_values: Tensor =
             tch::no_grad(|| self.target_network.forward(&self.memory_target, &b_state_));
         let max_target_values = target_values.max_dim(1, true).0;
@@ -446,10 +445,14 @@ impl SimulatorAgent {
         None
     }
 
-    pub fn history_to_input(event_history: &[SimulatorEvent], simulator: &Simulator) -> Tensor {
-        let mut input = Vec::with_capacity(Self::number_of_features(&simulator.tasks));
+    pub fn history_to_input(
+        &self,
+        event_history: &[SimulatorEvent],
+        simulator: &Simulator,
+    ) -> Tensor {
+        let mut input = Vec::with_capacity(self.number_of_features);
 
-        for task in &simulator.tasks {
+        for task in simulator.tasks.iter().take(self.number_of_tasks) {
             let wcet_l = task.borrow().task.props().wcet_l as f32;
             let last_job_execution_time = if let Some(diff_time) =
                 Self::last_task_execution_time(event_history, task.borrow().task.props().id)
@@ -466,11 +469,12 @@ impl SimulatorAgent {
         Tensor::from_slice(input.as_slice())
     }
 
-    pub fn sample_simulator_action(simulator: &Simulator) -> Option<SimulatorAction> {
+    pub fn sample_simulator_action(&self, simulator: &Simulator) -> Option<SimulatorAction> {
         let actions = Self::generate_actions(
             simulator
                 .tasks
                 .iter()
+                .take(self.number_of_tasks)
                 .map(|t| t.borrow().task.props())
                 .collect::<Vec<_>>()
                 .as_slice(),
@@ -484,6 +488,7 @@ impl SimulatorAgent {
     }
 
     pub fn epsilon_greedy(
+        &self,
         storage: &TensorStorage,
         policy: &dyn ComputeModel,
         epsilon: f32,
@@ -496,10 +501,10 @@ impl SimulatorAgent {
             println!("Using policy.");
             let value = tch::no_grad(|| policy.forward(storage, environment));
             let action_index = value.argmax(1, false).int64_value(&[]) as usize;
-            Self::index_to_action(action_index, simulator)
+            self.index_to_action(action_index, simulator)
         } else {
             println!("Using random action.");
-            Self::sample_simulator_action(simulator)
+            self.sample_simulator_action(simulator)
         }
     }
 
@@ -518,7 +523,7 @@ impl SimulatorAgent {
             + 1
     }
 
-    pub fn number_of_features(tasks: &[Rc<RefCell<SimulatorTask>>]) -> usize {
+    pub fn number_of_features(tasks: &[SimulatorTask]) -> usize {
         // We'll place the tasks from task to bottom.
         // Each task has 2 features: WCET_L and last job execution time.
         tasks.len() * 2
@@ -561,11 +566,12 @@ impl SimulatorAgent {
         actions
     }
 
-    fn index_to_action(index: usize, simulator: &Simulator) -> Option<SimulatorAction> {
+    fn index_to_action(&self, index: usize, simulator: &Simulator) -> Option<SimulatorAction> {
         let actions = Self::generate_actions(
             simulator
                 .tasks
                 .iter()
+                .take(self.number_of_tasks)
                 .map(|t| t.borrow().task.props())
                 .collect::<Vec<_>>()
                 .as_slice(),
@@ -576,11 +582,12 @@ impl SimulatorAgent {
         Some(actions[index])
     }
 
-    fn action_to_index(action: Option<&SimulatorAction>, simulator: &Simulator) -> usize {
+    fn action_to_index(&self, action: Option<&SimulatorAction>, simulator: &Simulator) -> usize {
         let actions = Self::generate_actions(
             simulator
                 .tasks
                 .iter()
+                .take(self.number_of_tasks)
                 .map(|t| t.borrow().task.props())
                 .collect::<Vec<_>>()
                 .as_slice(),
