@@ -12,11 +12,6 @@ pub fn handle_start_event(
     time: TimeUnit,
     simulator: &mut Simulator,
 ) {
-    simulator.push_event(Rc::new(RefCell::new(SimulatorEvent::Start(
-        task.clone(),
-        time,
-    ))));
-
     // Update the time of the next arrival
     let period = task.borrow().task.props().period;
     task.borrow_mut().next_arrival += period;
@@ -92,6 +87,13 @@ pub fn handle_end_event(
         time
     );
 
+    // Push exec time to the agent
+    if let Some(agent) = &simulator.agent {
+        agent
+            .borrow_mut()
+            .push_exec_time(task.borrow().task.props().id, job.borrow().exec_time);
+    }
+
     // Schedule the arrival of the next job of the same task
     let new_start_event = Rc::new(RefCell::new(SimulatorEvent::Start(
         job.borrow().task.clone(),
@@ -115,6 +117,10 @@ pub fn handle_end_event(
         let is_ltask = matches!(job.borrow().task.borrow().task, Task::LTask(_));
 
         if is_ltask {
+            println!(
+                "Killing task: {}",
+                job.borrow().task.borrow().task.props().id
+            );
             simulator.push_event(Rc::new(RefCell::new(SimulatorEvent::TaskKill(
                 task.clone(),
                 simulator.now,
@@ -161,6 +167,14 @@ fn run_job(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 }
 
 fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
+    if job.borrow().run_time == 0 {
+        // The job is starting for the first time.
+        simulator.push_event(Rc::new(RefCell::new(SimulatorEvent::Start(
+            job.borrow().task.clone(),
+            simulator.now,
+        ))));
+    }
+
     if let Some(running_job) = &simulator.running_job {
         // Cancel the termination event of the running_job (in the event queue)
         simulator.event_queue.retain(|event| {
@@ -170,6 +184,11 @@ fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 
         // Update the run time of the running_job
         running_job.borrow_mut().run_time += simulator.now - simulator.last_context_switch;
+
+        // Double check if the schedule is feasible
+        if running_job.borrow().run_time > running_job.borrow().task.borrow().task.props().wcet_h {
+            panic!("Schedule is not feasible");
+        }
 
         // Add the running_job to the ready jobs queue
         simulator.ready_jobs_queue.push(running_job.clone());

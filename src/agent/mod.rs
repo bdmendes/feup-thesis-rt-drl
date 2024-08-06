@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use self::dqn::{Policy, ReplayMemory};
@@ -20,6 +21,7 @@ pub const DEFAULT_GAMMA: f32 = 0.99;
 pub const DEFAULT_UPDATE_FREQ: usize = 5;
 pub const DEFAULT_LEARNING_RATE: f32 = 0.00005;
 pub const DEFAULT_SAMPLE_BATCH_SIZE: usize = 6;
+pub const MAX_EVENTS_STORED: usize = 10000;
 
 pub type SimulatorAction = (
     SimulatorActionPart,
@@ -141,6 +143,7 @@ pub struct SimulatorAgent {
 
     buffered_action: Option<SimulatorAction>,
     buffered_state: Option<Tensor>,
+    exec_times: HashMap<TaskId, TimeUnit>,
 }
 
 impl SimulatorAgent {
@@ -204,6 +207,7 @@ impl SimulatorAgent {
             number_of_features,
             _number_of_actions: number_of_actions,
             number_of_tasks: task_set.len(),
+            exec_times: HashMap::new(),
         }
     }
 
@@ -227,9 +231,19 @@ impl SimulatorAgent {
         self.mode_changes_to_lmode
     }
 
+    pub fn push_exec_time(&mut self, task_id: TaskId, exec_time: TimeUnit) {
+        self.exec_times.insert(task_id, exec_time);
+    }
+
     pub fn push_event(&mut self, event: SimulatorEvent) {
-        if self.events_history.len() > self.replay_memory.capacity - 1 {
+        if matches!(event, SimulatorEvent::End(_, _, _)) {
+            // We don't need to track end events.
+            return;
+        }
+
+        if self.events_history.len() > MAX_EVENTS_STORED - 1 {
             self.events_history.remove(0);
+            self.last_processed_event_index = self.last_processed_event_index.saturating_sub(1);
         }
         self.events_history.push(event);
     }
@@ -242,7 +256,7 @@ impl SimulatorAgent {
         println!("\nActivating agent.");
 
         // Build a state tensor from the simulator's state.
-        let state = Self::history_to_input(self, &self.events_history, simulator);
+        let state = Self::history_to_input(self, simulator);
 
         // Get a new action from the policy.
         let action = match self.stage {
@@ -308,6 +322,7 @@ impl SimulatorAgent {
             .map(|e| Self::event_to_reward(e, simulator))
             .sum::<f64>();
         self.cumulative_reward += reward;
+        println!("Reward: {}", reward);
         println!("Cumulative reward: {}", self.cumulative_reward);
         self.reward_history.push(reward as f32);
         self.last_processed_event_index = self.events_history.len();
@@ -413,54 +428,17 @@ impl SimulatorAgent {
         }
     }
 
-    fn last_task_execution_time(history: &[SimulatorEvent], id: TaskId) -> Option<TimeUnit> {
-        // FIXME: This is not efficient, and does not take into account preemptions.
-
-        let last_end_event_offset = history.iter().rev().position(|e| match e {
-            SimulatorEvent::End(task, _, _) => task.borrow().task.props().id == id,
-            _ => false,
-        });
-
-        if let Some(last_end_event_offset) = last_end_event_offset {
-            let end_time = match history.iter().rev().nth(last_end_event_offset).unwrap() {
-                SimulatorEvent::End(_, time, _) => time,
-                _ => unreachable!(),
-            };
-            let previous_start_event =
-                history
-                    .iter()
-                    .rev()
-                    .skip(last_end_event_offset)
-                    .find(|e| match e {
-                        SimulatorEvent::Start(task, _) => task.borrow().task.props().id == id,
-                        _ => false,
-                    });
-            let start_time = match previous_start_event {
-                Some(SimulatorEvent::Start(_, time)) => *time,
-                _ => *end_time,
-            };
-            return Some((end_time - start_time) as TimeUnit);
-        }
-
-        None
-    }
-
-    pub fn history_to_input(
-        &self,
-        event_history: &[SimulatorEvent],
-        simulator: &Simulator,
-    ) -> Tensor {
+    pub fn history_to_input(&self, simulator: &Simulator) -> Tensor {
         let mut input = Vec::with_capacity(self.number_of_features);
 
         for task in simulator.tasks.iter().take(self.number_of_tasks) {
             let wcet_l = task.borrow().task.props().wcet_l as f32;
-            let last_job_execution_time = if let Some(diff_time) =
-                Self::last_task_execution_time(event_history, task.borrow().task.props().id)
-            {
-                diff_time as f32
-            } else {
-                -1.0
-            };
+            let last_job_execution_time =
+                if let Some(diff_time) = self.exec_times.get(&task.borrow().task.props().id) {
+                    *diff_time as f32
+                } else {
+                    -1.0
+                };
 
             input.push(wcet_l);
             input.push(last_job_execution_time);
