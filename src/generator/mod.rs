@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use crate::simulator::task::{SimulatorTask, Task, TaskProps, TimeUnit};
 
+mod weibull;
+
 // Data gathered from "Real World Automotive Benchmarks For Free", from
 // Simon Kramer, Dirk Ziegenbein, Arne Hamann, a corporate research paper
 // from Robert Bosch GmbH.
@@ -105,6 +107,8 @@ pub struct Runnable {
     // f oscillating between f_min and f_max.
     bcet: TimeUnit,
     wcet: TimeUnit,
+    // Used for sampling the execution time of the runnable.
+    //weibull: Weibull,
 }
 
 impl Runnable {
@@ -162,6 +166,10 @@ impl Runnable {
         // This allows us to represent us with a precision of 10^-2.
         (duration.as_secs_f64() * 100_000_000.0) as TimeUnit
     }
+
+    // pub fn sample_exec_time(&self, weibull: &Weibull, rng: &mut source::Default) -> f64 {
+    //     //  weibull.sample(rng) + runnable.bcet as f64
+    // }
 }
 
 pub fn generate_tasks(
