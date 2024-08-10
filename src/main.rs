@@ -329,7 +329,7 @@ pub fn testing_fast() {
 }
 
 fn main() {
-    hp_tuning();
+    // hp_tuning();
     //activation_time();
-    //testing_fast();
+    testing_fast();
 }

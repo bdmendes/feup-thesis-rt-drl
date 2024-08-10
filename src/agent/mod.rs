@@ -7,7 +7,6 @@ use crate::agent::dqn::Transition;
 use crate::ml::tensor::{mean_squared_error, TensorStorage};
 use crate::ml::ComputeModel;
 use crate::simulator::task::{SimulatorTask, TaskProps, TimeUnit};
-use crate::simulator::validation::feasible_schedule_online;
 use crate::simulator::SimulatorMode;
 use crate::simulator::{task::TaskId, Simulator, SimulatorEvent};
 use rand::Rng;
@@ -259,34 +258,21 @@ impl SimulatorAgent {
         let state = Self::history_to_input(self, simulator);
 
         // Get a new action from the policy.
-        let action = match self.stage {
-            SimulatorAgentStage::Placebo => vec![SimulatorActionPart::None],
-            _ => self
-                .epsilon_greedy(
-                    &self.memory_policy,
-                    &self.policy_network,
-                    self.epsilon,
-                    &state,
-                    simulator,
-                )
-                .map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]),
+        // This will be applied by the simulator once the agent's task is finished.
+        let raw_action = match self.stage {
+            SimulatorAgentStage::Placebo => None,
+            _ => self.epsilon_greedy(
+                &self.memory_policy,
+                &self.policy_network,
+                self.epsilon,
+                &state,
+                simulator,
+            ),
         };
-        println!("Got action: {:?}", action);
-
-        // Apply it to the simulator.
-        // If this is not valid, revert the action and ignore it.
-        action.iter().for_each(|a| a.apply(&mut simulator.tasks));
-        if !matches!(action[0], SimulatorActionPart::None) {
-            if !feasible_schedule_online(&simulator.tasks) {
-                println!("Invalid action {:?}, reverting.", action);
-                let reverse_action = action.iter().map(|a| a.reverse()).collect::<Vec<_>>();
-                reverse_action
-                    .iter()
-                    .for_each(|a| a.apply(&mut simulator.tasks));
-            } else {
-                println!("Applied action {:?}", action);
-            }
-        }
+        let action_parts =
+            raw_action.map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]);
+        simulator.set_pending_agent_action(raw_action);
+        println!("Got action: {:?}", raw_action);
 
         // Track events.
         if self.track {
@@ -352,10 +338,10 @@ impl SimulatorAgent {
         }
 
         // Store this action and state to generate a transition later.
-        self.buffered_action = if action == vec![SimulatorActionPart::None] {
+        self.buffered_action = if action_parts == vec![SimulatorActionPart::None] {
             None
         } else {
-            Some((action[0], action[1], action[2]))
+            Some((action_parts[0], action_parts[1], action_parts[2]))
         };
         self.buffered_state = Some(state);
 
@@ -475,7 +461,7 @@ impl SimulatorAgent {
     ) -> Option<SimulatorAction> {
         let mut rng = rand::thread_rng();
         let random_number: f32 = rng.gen::<f32>();
-        if random_number > epsilon {
+        if random_number > epsilon || self.stage == SimulatorAgentStage::Reactive {
             println!("Using policy.");
             let value = tch::no_grad(|| policy.forward(storage, environment));
             let action_index = value.argmax(1, false).int64_value(&[]) as usize;

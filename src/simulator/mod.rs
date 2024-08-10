@@ -2,7 +2,10 @@ use probability::source;
 use task::TaskProps;
 
 use self::task::{SimulatorTask, TaskId, TimeUnit};
-use crate::{agent::SimulatorAgent, generator::Runnable};
+use crate::{
+    agent::{SimulatorAction, SimulatorAgent},
+    generator::Runnable,
+};
 use std::{
     cell::RefCell,
     collections::{BinaryHeap, HashMap},
@@ -170,6 +173,9 @@ pub struct Simulator {
     pub tasks: Vec<Rc<RefCell<SimulatorTask>>>,
     pub random_execution_time: bool,
     pub agent: Option<Rc<RefCell<SimulatorAgent>>>,
+    pub pending_agent_action: Option<SimulatorAction>,
+
+    // Stats.
     pub elapsed_times: Vec<time::Duration>,
     pub memory_usage: Vec<(usize, usize)>,
 
@@ -225,7 +231,12 @@ impl Simulator {
             now: 0,
             mode: SimulatorMode::LMode,
             running_history: vec![],
+            pending_agent_action: None,
         }
+    }
+
+    pub fn set_pending_agent_action(&mut self, action: Option<SimulatorAction>) {
+        self.pending_agent_action = action;
     }
 
     fn init_event_queue(&mut self) {
