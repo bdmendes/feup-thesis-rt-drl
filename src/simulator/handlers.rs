@@ -34,13 +34,7 @@ pub fn handle_start_event(
         );
     }
     let next_exec_time = if simulator.random_execution_time {
-        Task::sample_execution_time(
-            task.borrow().acet,
-            task.borrow().bcet,
-            task.borrow().task.props().wcet_h,
-            &mut simulator.random_source,
-            crate::generator::TimeSampleDistribution::Pert,
-        )
+        task.borrow().task.sample_execution_time()
     } else {
         task.borrow().acet
     };

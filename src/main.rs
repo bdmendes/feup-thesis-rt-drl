@@ -4,7 +4,6 @@ use agent::{
     DEFAULT_MEM_SIZE, DEFAULT_MIN_MEM_SIZE, DEFAULT_SAMPLE_BATCH_SIZE, DEFAULT_UPDATE_FREQ,
 };
 use generator::{generate_tasks, Runnable};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use simulator::{task::SimulatorTask, Simulator};
 use std::{
     cell::RefCell,
@@ -130,14 +129,10 @@ fn tune(tasks: Vec<SimulatorTask>) {
     });
 }
 
-fn generate_sets(size: usize, number_runnables: usize) -> Vec<Vec<SimulatorTask>> {
+fn generate_sets(size: usize) -> Vec<Vec<SimulatorTask>> {
     let mut task_sets = vec![];
     while task_sets.len() < size {
-        let set = generate_tasks(
-            0.7,
-            number_runnables,
-            generator::TimeSampleDistribution::Pert,
-        );
+        let set = generate_tasks();
         if !feasible_schedule_design_time(&set) {
             continue;
         }
@@ -146,32 +141,10 @@ fn generate_sets(size: usize, number_runnables: usize) -> Vec<Vec<SimulatorTask>
     task_sets
 }
 
-fn simulate_placebo(tasks: Vec<SimulatorTask>, secs: usize) -> (usize, usize) {
-    let test_instants: u64 = Runnable::duration_to_time_unit(Duration::from_secs(secs as u64));
-
-    let agent = Rc::new(RefCell::new(SimulatorAgent::new(
-        DEFAULT_MEM_SIZE,
-        DEFAULT_MIN_MEM_SIZE,
-        DEFAULT_GAMMA,
-        DEFAULT_UPDATE_FREQ,
-        DEFAULT_LEARNING_RATE,
-        vec![8],
-        DEFAULT_SAMPLE_BATCH_SIZE,
-        ActivationFunction::Sigmoid,
-        &tasks,
-    )));
-    agent.borrow_mut().placebo_mode();
-    let mut simulator = Simulator::new(tasks, true, Some(agent.clone()));
-    simulator.fire::<false>(test_instants);
-    let mode_changes_to_hmode = agent.borrow().mode_changes_to_hmode();
-    let task_kills = agent.borrow().task_kills();
-    (mode_changes_to_hmode, task_kills)
-}
-
 pub fn hp_tuning() {
     std::fs::create_dir_all("out").unwrap();
     loop {
-        let set = generate_sets(1, 75);
+        let set = generate_sets(1);
         if feasible_schedule_design_time(&set[0]) {
             println!("Feasible schedule found, tuning hyperparameters...");
             sleep(Duration::from_millis(100));
@@ -183,106 +156,8 @@ pub fn hp_tuning() {
     }
 }
 
-pub fn placebo() {
-    std::fs::create_dir_all("out").unwrap();
-    let set_25 = generate_sets(50, 25);
-    let changes_kills_25 = set_25
-        .par_iter()
-        .map(|tasks| {
-            let (mode_changes_to_h, task_kills) = simulate_placebo(tasks.clone(), 1);
-            (mode_changes_to_h, task_kills)
-        })
-        .collect::<Vec<_>>();
-    let mut file_25 = std::fs::File::create("out/changes_kills_25.txt").unwrap();
-    for (mode_changes_to_h, task_kills) in changes_kills_25 {
-        file_25
-            .write_all(
-                format!(
-                    "Mode changes to H: {}; Task kills: {}\n",
-                    mode_changes_to_h, task_kills
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-    }
-    let set_100 = generate_sets(50, 100);
-    let changes_kills_100 = set_100
-        .par_iter()
-        .map(|tasks| {
-            let (mode_changes_to_h, task_kills) = simulate_placebo(tasks.clone(), 1);
-            (mode_changes_to_h, task_kills)
-        })
-        .collect::<Vec<_>>();
-    let mut file_100 = std::fs::File::create("out/changes_kills_100.txt").unwrap();
-    for (mode_changes_to_h, task_kills) in changes_kills_100 {
-        file_100
-            .write_all(
-                format!(
-                    "Mode changes to H: {}; Task kills: {}\n",
-                    mode_changes_to_h, task_kills
-                )
-                .as_bytes(),
-            )
-            .unwrap();
-    }
-}
-
-fn activation_time_size(hidden_sizes: Vec<usize>, set: &[Vec<SimulatorTask>]) {
-    let agent = Rc::new(RefCell::new(SimulatorAgent::new(
-        DEFAULT_MEM_SIZE,
-        DEFAULT_MIN_MEM_SIZE,
-        DEFAULT_GAMMA,
-        DEFAULT_UPDATE_FREQ,
-        DEFAULT_LEARNING_RATE,
-        hidden_sizes.clone(),
-        DEFAULT_SAMPLE_BATCH_SIZE,
-        ActivationFunction::Sigmoid,
-        &set[0],
-    )));
-    agent.borrow_mut().placebo_mode();
-    agent.borrow_mut().skip_tracking();
-    let mut simulator = Simulator::new(set[0].clone(), true, Some(agent.clone()));
-    simulator.fire::<false>(Runnable::duration_to_time_unit(Duration::from_secs(2)));
-
-    // write activation times
-    let mut file =
-        std::fs::File::create(format!("out/activation_times_{}.txt", hidden_sizes.len())).unwrap();
-    let _ = file.write_all(
-        simulator
-            .elapsed_times
-            .iter()
-            .map(|x| x.as_micros().to_string())
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_string()
-            .as_bytes(),
-    );
-
-    // write memory usage
-    let mut file =
-        std::fs::File::create(format!("out/memory_usage_{}.txt", hidden_sizes.len())).unwrap();
-    let _ = file.write_all(
-        simulator
-            .memory_usage
-            .iter()
-            .map(|x| format!("{:.2} {:.2}", x.0, x.1))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .to_string()
-            .as_bytes(),
-    );
-}
-
-pub fn activation_time() {
-    std::fs::create_dir_all("out").unwrap();
-    let set = generate_sets(1, 100);
-
-    activation_time_size(vec![set[0].len() / 2], &set);
-    activation_time_size(vec![set[0].len(), set[0].len() / 2, set[0].len() / 4], &set);
-}
-
 pub fn testing_fast() {
-    let tasks = generate_tasks(0.3, 80, generator::TimeSampleDistribution::Pert);
+    let tasks = generate_tasks();
     assert!(feasible_schedule_design_time(&tasks));
     let mut simulator = Simulator::new(
         tasks.clone(),
@@ -330,6 +205,5 @@ pub fn testing_fast() {
 
 fn main() {
     // hp_tuning();
-    //activation_time();
     testing_fast();
 }

@@ -1,8 +1,3 @@
-use probability::distribution::{Pert, Sample, Triangular};
-use probability::source::Xorshift128Plus;
-
-use crate::generator::TimeSampleDistribution;
-
 use super::SimulatorMode;
 
 pub type TaskId = u64;
@@ -36,21 +31,8 @@ impl Task {
         }
     }
 
-    pub fn sample_execution_time(
-        acet: TimeUnit,
-        bcet: TimeUnit,
-        wcet: TimeUnit,
-        source: &mut Xorshift128Plus,
-        dist: TimeSampleDistribution,
-    ) -> TimeUnit {
-        match dist {
-            TimeSampleDistribution::Triangular => {
-                Triangular::new(bcet as f64, wcet as f64, acet as f64).sample(source) as TimeUnit
-            }
-            TimeSampleDistribution::Pert => {
-                Pert::new(bcet as f64, acet as f64, wcet as f64).sample(source) as TimeUnit
-            }
-        }
+    pub fn sample_execution_time(&self) -> TimeUnit {
+        todo!()
     }
 }
 
@@ -116,40 +98,6 @@ impl SimulatorTask {
             acet,
             bcet: acet,
             next_arrival: task.props().offset,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use probability::source;
-
-    #[test]
-    fn sample_time() {
-        let (bcet, acet, wcet) = (3, 10, 30);
-        let mut source = source::default(42);
-
-        for _ in 0..10000 {
-            let time = super::Task::sample_execution_time(
-                acet,
-                bcet,
-                wcet,
-                &mut source,
-                super::TimeSampleDistribution::Pert,
-            );
-            print!("{}, ", time);
-        }
-        println!("\n");
-
-        for _ in 0..10000 {
-            let time = super::Task::sample_execution_time(
-                acet,
-                bcet,
-                wcet,
-                &mut source,
-                super::TimeSampleDistribution::Triangular,
-            );
-            print!("{}, ", time);
         }
     }
 }
