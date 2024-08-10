@@ -1,6 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::simulator::EndReason;
+use crate::{
+    agent::SimulatorActionPart,
+    simulator::{validation::feasible_schedule_online, EndReason},
+};
 
 use super::{
     task::{SimulatorTask, Task, TimeUnit},
@@ -86,6 +89,28 @@ pub fn handle_end_event(
         job.borrow().task.borrow().task.props().id,
         time
     );
+
+    // If this is the agent, apply its actions
+    if job.borrow().is_agent && simulator.pending_agent_action.is_some() {
+        println!("Applying agent's actions");
+        let action_parts = simulator
+            .pending_agent_action
+            .map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]);
+        action_parts
+            .iter()
+            .for_each(|a| a.apply(&mut simulator.tasks));
+        if !matches!(action_parts[0], SimulatorActionPart::None) {
+            if !feasible_schedule_online(&simulator.tasks) {
+                println!("Invalid action {:?}, reverting.", action_parts);
+                let reverse_action = action_parts.iter().map(|a| a.reverse()).collect::<Vec<_>>();
+                reverse_action
+                    .iter()
+                    .for_each(|a| a.apply(&mut simulator.tasks));
+            } else {
+                println!("Applied action {:?}", action_parts);
+            }
+        }
+    }
 
     // Push exec time to the agent
     if let Some(agent) = &simulator.agent {
