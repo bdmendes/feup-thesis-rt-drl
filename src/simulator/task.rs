@@ -1,3 +1,5 @@
+use crate::generator::Runnable;
+
 use super::SimulatorMode;
 
 pub type TaskId = u64;
@@ -29,10 +31,6 @@ impl Task {
             Task::LTask(props) => props,
             Task::HTask(props) => props,
         }
-    }
-
-    pub fn sample_execution_time(&self) -> TimeUnit {
-        todo!()
     }
 }
 
@@ -72,9 +70,10 @@ impl TaskProps {
 pub struct SimulatorTask {
     pub task: Task,
     pub custom_priority: Option<u64>,
-    pub acet: TimeUnit, // Average Case Execution Time
-    pub bcet: TimeUnit, // Best Case Execution Time
+    pub acet: Option<TimeUnit>, // Average Case Execution Time
+    pub bcet: Option<TimeUnit>, // Best Case Execution Time
     pub next_arrival: TimeUnit,
+    pub runnables: Option<Vec<Runnable>>,
 }
 
 impl SimulatorTask {
@@ -84,9 +83,21 @@ impl SimulatorTask {
         Self {
             task: task.clone(),
             custom_priority: None,
-            acet,
-            bcet,
+            acet: Some(acet),
+            bcet: Some(bcet),
             next_arrival: task.props().offset,
+            runnables: None,
+        }
+    }
+
+    pub fn new_with_runnables(task: Task, runnables: Vec<Runnable>) -> Self {
+        Self {
+            task: task.clone(),
+            custom_priority: None,
+            acet: None,
+            bcet: None,
+            next_arrival: task.props().offset,
+            runnables: Some(runnables),
         }
     }
 
@@ -95,9 +106,18 @@ impl SimulatorTask {
         Self {
             task: task.clone(),
             custom_priority: Some(priority),
-            acet,
-            bcet: acet,
+            acet: Some(acet),
+            bcet: None,
             next_arrival: task.props().offset,
+            runnables: None,
+        }
+    }
+
+    pub fn sample_execution_time(&self) -> TimeUnit {
+        if let Some(runnables) = &self.runnables {
+            runnables.iter().map(|r| r.sample_exec_time()).sum::<f64>() as TimeUnit
+        } else {
+            self.acet.unwrap()
         }
     }
 }

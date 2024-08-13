@@ -31,12 +31,16 @@ pub fn runnables_acets_uunifast(
     max_acet: f64,
     period: f64,
 ) -> Vec<f64> {
-    loop {
-        let acets = uunifast(avg_acet, number_runnables);
-        if valid_utilizations(acets.clone(), min_acet, max_acet, period) {
-            return acets;
+    for _ in 0..100 {
+        let utilizations = uunifast(avg_acet / period, number_runnables);
+        if valid_utilizations(utilizations.clone(), min_acet, max_acet, period) {
+            return utilizations.iter().map(|u| (u * period).max(1.0)).collect();
         }
     }
+
+    (0..number_runnables)
+        .map(|_| ((avg_acet / period).max(1.0)))
+        .collect()
 }
 
 #[cfg(test)]

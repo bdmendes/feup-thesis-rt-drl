@@ -204,6 +204,6 @@ pub fn testing_fast() {
 }
 
 fn main() {
-    // hp_tuning();
-    testing_fast();
+    hp_tuning();
+    //testing_fast();
 }
