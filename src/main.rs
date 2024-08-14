@@ -127,6 +127,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                         .create(true)
                         .open(format!("out/test_{hyper_iteration}.txt"))
                         .unwrap();
+                    file.set_len(0).unwrap();
                     file.write_all(format!("hidden sizes: {:?}; sample batch size: {}; activation function: {:?}\n", hidden_sizes, sample_batch_size, activation_function).as_bytes()).unwrap();
 
                     for _ in 0..number_test_simulations {
