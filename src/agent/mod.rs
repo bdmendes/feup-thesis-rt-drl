@@ -419,6 +419,8 @@ impl SimulatorAgent {
 
         for task in simulator.tasks.iter().take(self.number_of_tasks) {
             let wcet_l = task.borrow().task.props().wcet_l as f32;
+            let wcet_h = task.borrow().task.props().wcet_h as f32;
+            let bcet = task.borrow().bcet as f32;
             let last_job_execution_time =
                 if let Some(diff_time) = self.exec_times.get(&task.borrow().task.props().id) {
                     *diff_time as f32
@@ -426,8 +428,9 @@ impl SimulatorAgent {
                     -1.0
                 };
 
-            input.push(wcet_l);
-            input.push(last_job_execution_time);
+            // Push normalized values.
+            input.push((wcet_l - bcet) / (wcet_h - bcet));
+            input.push((last_job_execution_time - bcet) / (wcet_h - bcet));
         }
 
         Tensor::from_slice(input.as_slice())

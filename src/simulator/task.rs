@@ -70,8 +70,8 @@ impl TaskProps {
 pub struct SimulatorTask {
     pub task: Task,
     pub custom_priority: Option<u64>,
-    pub acet: Option<TimeUnit>, // Average Case Execution Time
-    pub bcet: Option<TimeUnit>, // Best Case Execution Time
+    pub acet: TimeUnit,
+    pub bcet: TimeUnit,
     pub next_arrival: TimeUnit,
     pub runnables: Option<Vec<Runnable>>,
 }
@@ -83,8 +83,8 @@ impl SimulatorTask {
         Self {
             task: task.clone(),
             custom_priority: None,
-            acet: Some(acet),
-            bcet: Some(bcet),
+            acet,
+            bcet,
             next_arrival: task.props().offset,
             runnables: None,
         }
@@ -94,8 +94,8 @@ impl SimulatorTask {
         Self {
             task: task.clone(),
             custom_priority: None,
-            acet: None,
-            bcet: None,
+            acet: runnables.iter().map(|r| r.acet).sum(),
+            bcet: runnables.iter().map(|r| r.bcet).sum(),
             next_arrival: task.props().offset,
             runnables: Some(runnables),
         }
@@ -106,8 +106,8 @@ impl SimulatorTask {
         Self {
             task: task.clone(),
             custom_priority: Some(priority),
-            acet: Some(acet),
-            bcet: None,
+            acet,
+            bcet: acet,
             next_arrival: task.props().offset,
             runnables: None,
         }
@@ -117,7 +117,7 @@ impl SimulatorTask {
         if let Some(runnables) = &self.runnables {
             runnables.iter().map(|r| r.sample_exec_time()).sum::<f64>() as TimeUnit
         } else {
-            self.acet.unwrap()
+            self.acet
         }
     }
 }

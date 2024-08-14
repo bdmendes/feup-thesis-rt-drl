@@ -36,7 +36,7 @@ pub fn handle_start_event(
     let next_exec_time = if simulator.random_execution_time {
         task.borrow().sample_execution_time()
     } else {
-        task.borrow().acet.unwrap()
+        task.borrow().acet
     };
     job.borrow_mut().exec_time = next_exec_time;
     job.borrow_mut().run_time = 0;

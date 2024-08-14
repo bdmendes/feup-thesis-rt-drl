@@ -21,7 +21,7 @@ impl RunnableWeibull {
         let k = Self::weibull_k(bcet, wcet, min_quantile, max_quantile);
         let lambda = Self::weibull_lambda(bcet, acet, k);
 
-        let w = Weibull::new(k, lambda).unwrap();
+        let w = Weibull::new(k.abs(), lambda.abs()).unwrap();
         RunnableWeibull {
             weibull: w,
             bcet: (bcet as u64) as f64,

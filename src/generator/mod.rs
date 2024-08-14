@@ -94,13 +94,13 @@ pub struct Runnable {
     // Given a runnable with a given period,
     // the average execution time depends on
     // the nature of the task.
-    _acet: TimeUnit,
+    pub acet: TimeUnit,
 
     // The best case exectution time (BCET) and the worst case
     // execution time (WCET) are calculated given a factor
     // f oscillating between f_min and f_max.
-    bcet: TimeUnit,
-    wcet: TimeUnit,
+    pub bcet: TimeUnit,
+    pub wcet: TimeUnit,
 
     // Used for sampling the execution time of the runnable.
     weibull: RunnableWeibull,
@@ -108,7 +108,7 @@ pub struct Runnable {
 
 impl PartialEq for Runnable {
     fn eq(&self, other: &Self) -> bool {
-        self._acet == other._acet && self.bcet == other.bcet && self.wcet == other.wcet
+        self.acet == other.acet && self.bcet == other.bcet && self.wcet == other.wcet
     }
 }
 
@@ -136,7 +136,7 @@ impl Runnable {
                 let bcet = acet * bcet_f;
                 let wcet = acet * wcet_f;
                 Runnable {
-                    _acet: acet as TimeUnit,
+                    acet: acet as TimeUnit,
                     bcet: bcet as TimeUnit,
                     wcet: wcet as TimeUnit,
                     weibull: RunnableWeibull::new(bcet, acet, wcet),
@@ -255,6 +255,8 @@ pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
 
 #[cfg(test)]
 mod tests {
+    use crate::simulator::validation::feasible_schedule_design_time;
+
     #[test]
     fn gen_tasks() {
         let tasks = super::generate_tasks(80);
@@ -278,5 +280,24 @@ mod tests {
             }
             println!();
         }
+    }
+
+    #[test]
+    fn schedulable_sets() {
+        let mut data = vec![];
+
+        for nr_runnables in (10..=700).step_by(10) {
+            let mut schedulable_sets = 0;
+            for _ in 0..500 {
+                let tasks = super::generate_tasks(nr_runnables);
+                if feasible_schedule_design_time(&tasks.clone()) {
+                    schedulable_sets += 1;
+                }
+            }
+            println!("{} {}", nr_runnables, schedulable_sets as f64 / 500.0);
+            data.push(schedulable_sets as f64 / 500.0);
+        }
+
+        println!("{:?}", data);
     }
 }
