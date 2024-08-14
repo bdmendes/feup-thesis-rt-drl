@@ -132,7 +132,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
 fn generate_sets(size: usize) -> Vec<Vec<SimulatorTask>> {
     let mut task_sets = vec![];
     while task_sets.len() < size {
-        let set = generate_tasks();
+        let set = generate_tasks(50);
         if !feasible_schedule_design_time(&set) {
             continue;
         }
@@ -157,7 +157,7 @@ pub fn hp_tuning() {
 }
 
 pub fn testing_fast() {
-    let tasks = generate_tasks();
+    let tasks = generate_tasks(50);
     assert!(feasible_schedule_design_time(&tasks));
     let mut simulator = Simulator::new(
         tasks.clone(),

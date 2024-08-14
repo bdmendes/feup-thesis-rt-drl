@@ -1,13 +1,13 @@
-use ctor::ctor;
-use rand::prelude::{Distribution, SliceRandom};
-use statrs::distribution::Uniform;
-use std::time::Duration;
-use weibull::RunnableWeibull;
-
 use crate::simulator::{
     task::{SimulatorTask, Task, TaskProps, TimeUnit},
     SimulatorMode,
 };
+use ctor::ctor;
+use rand::prelude::{Distribution, SliceRandom};
+use rand::Rng;
+use statrs::distribution::Uniform;
+use std::{collections::HashMap, time::Duration};
+use weibull::RunnableWeibull;
 
 mod uunifast;
 mod weibull;
@@ -85,8 +85,7 @@ static BCET_WCET_FACTORS: [[f64; 4]; 9] = [
     [0.45, 0.98, 1.03, 4.90],
     [0.68, 0.80, 1.84, 4.75],
 ];
-static RUNNABLES_PER_PERIOD_TAKE: [u8; 4] = [2, 3, 4, 5];
-static RUNNABLES_PER_PERIOD_TAKE_WEIGHTS: [u8; 4] = [30, 40, 20, 10];
+static RUNNABLE_DISTRIBUTION_PER_PERIOD: [u64; 9] = [3, 2, 2, 25, 25, 3, 20, 1, 4];
 static WCET_L_PROBABILITIES_PER_PERIOD_L: [u64; 9] = [75, 75, 75, 67, 67, 67, 50, 50, 50];
 static WCET_L_PROBABILITIES_PER_PERIOD_H: [u64; 9] = [80, 80, 80, 75, 75, 75, 67, 67, 67];
 
@@ -107,31 +106,25 @@ pub struct Runnable {
     weibull: RunnableWeibull,
 }
 
+impl PartialEq for Runnable {
+    fn eq(&self, other: &Self) -> bool {
+        self._acet == other._acet && self.bcet == other.bcet && self.wcet == other.wcet
+    }
+}
+
 impl Runnable {
-    fn new_batch(period: Duration) -> Vec<Runnable> {
+    fn new_batch(period: Duration, number: usize) -> Vec<Runnable> {
         let period_index = RUNNABLE_PERIODS.iter().position(|&x| x == period).unwrap();
         let [min_acet, avg_acet, max_acet] = MIN_AVG_MAX_AVG_EXECUTION_TIMES[period_index];
 
-        let runnables_per_period_take = *RUNNABLES_PER_PERIOD_TAKE
-            .choose_weighted(&mut rand::thread_rng(), |p| {
-                let index = RUNNABLES_PER_PERIOD_TAKE
-                    .iter()
-                    .position(|&x| x == *p)
-                    .unwrap();
-                RUNNABLES_PER_PERIOD_TAKE_WEIGHTS[index]
-            })
-            .unwrap();
-
-        assert!((2..=5).contains(&runnables_per_period_take));
-
         let acets = uunifast::runnables_acets_uunifast(
-            runnables_per_period_take as usize,
+            number,
             Self::duration_to_time_unit(avg_acet) as f64,
             Self::duration_to_time_unit(min_acet) as f64,
             Self::duration_to_time_unit(max_acet) as f64,
             Self::duration_to_time_unit(period) as f64,
         );
-        assert_eq!(acets.len(), runnables_per_period_take as usize);
+        assert_eq!(acets.len(), number);
         let rng = &mut rand::thread_rng();
 
         acets
@@ -180,38 +173,80 @@ impl Runnable {
     pub fn sample_exec_time(&self) -> f64 {
         let rng = &mut rand::thread_rng();
         let s = self.weibull.sample(rng);
-        println!("s: {}, wcet: {}", s, self.wcet);
         assert!(s <= self.wcet as f64);
         assert!(s >= self.bcet as f64);
         s.max(1.0)
     }
 }
 
-pub fn generate_tasks() -> Vec<SimulatorTask> {
+pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
+    let rng = &mut rand::thread_rng();
+    let mut period_runnables = HashMap::<Duration, usize>::new();
     let mut id = 0;
     let mut tasks = Vec::new();
 
-    for mode in &[SimulatorMode::LMode, SimulatorMode::HMode] {
-        for period in &RUNNABLE_PERIODS {
-            let runnables = Runnable::new_batch(*period);
-            let props = TaskProps {
+    for _ in 0..number_runnables {
+        let chosen_period = RUNNABLE_PERIODS
+            .choose_weighted(rng, |&x| {
+                RUNNABLE_DISTRIBUTION_PER_PERIOD
+                    [RUNNABLE_PERIODS.iter().position(|&y| y == x).unwrap()]
+            })
+            .unwrap();
+        period_runnables
+            .entry(*chosen_period)
+            .and_modify(|e| *e += 1)
+            .or_insert(1);
+    }
+
+    for period in period_runnables.keys() {
+        let runnables = Runnable::new_batch(*period, period_runnables[period]);
+        let l_runnables = runnables
+            .iter()
+            .filter(|_| rng.gen_bool(0.5))
+            .cloned()
+            .collect::<Vec<Runnable>>();
+        let h_runnables = runnables
+            .iter()
+            .filter(|r| !l_runnables.contains(r))
+            .cloned()
+            .collect::<Vec<Runnable>>();
+
+        // L-task
+        if !l_runnables.is_empty() {
+            let l_task_props = TaskProps {
                 id,
-                period: Runnable::duration_to_time_unit(*period),
-                wcet_l: runnables
-                    .iter()
-                    .map(|r| r.wcet_l_estimate(*period, *mode))
-                    .sum::<f64>() as TimeUnit,
-                wcet_h: runnables.iter().map(|r| r.wcet).sum(),
                 offset: 0,
+                period: Runnable::duration_to_time_unit(*period),
+                wcet_l: l_runnables
+                    .iter()
+                    .map(|r| r.wcet_l_estimate(*period, SimulatorMode::LMode))
+                    .sum::<f64>() as u64,
+                wcet_h: l_runnables.iter().map(|r| r.wcet).sum(),
             };
-            tasks.push(SimulatorTask::new_with_runnables(
-                match mode {
-                    SimulatorMode::LMode => Task::LTask(props),
-                    SimulatorMode::HMode => Task::HTask(props),
-                },
-                runnables,
-            ));
             id += 1;
+            tasks.push(SimulatorTask::new_with_runnables(
+                Task::LTask(l_task_props),
+                l_runnables,
+            ));
+        }
+
+        // H-task
+        if !h_runnables.is_empty() {
+            let h_task_props = TaskProps {
+                id,
+                offset: 0,
+                period: Runnable::duration_to_time_unit(*period),
+                wcet_l: h_runnables
+                    .iter()
+                    .map(|r| r.wcet_l_estimate(*period, SimulatorMode::HMode))
+                    .sum::<f64>() as u64,
+                wcet_h: h_runnables.iter().map(|r| r.wcet).sum(),
+            };
+            id += 1;
+            tasks.push(SimulatorTask::new_with_runnables(
+                Task::HTask(h_task_props),
+                h_runnables,
+            ));
         }
     }
 
@@ -222,11 +257,17 @@ pub fn generate_tasks() -> Vec<SimulatorTask> {
 mod tests {
     #[test]
     fn gen_tasks() {
-        let tasks = super::generate_tasks();
-        assert_eq!(tasks.len(), 18);
+        let tasks = super::generate_tasks(80);
 
         for task in tasks {
-            println!("Task: {:?}", task.task.props().id);
+            println!(
+                "Task: {:?}, mode: {}",
+                task.task.props().id,
+                match task.task {
+                    super::Task::LTask(_) => "L",
+                    super::Task::HTask(_) => "H",
+                }
+            );
             println!("Period: {}", task.task.props().period);
             println!("WCET_L: {}", task.task.props().wcet_l);
             for runnable in task.clone().runnables.unwrap() {
