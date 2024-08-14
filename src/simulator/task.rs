@@ -120,4 +120,8 @@ impl SimulatorTask {
             self.acet
         }
     }
+
+    pub fn priority(&self) -> TimeUnit {
+        self.custom_priority.unwrap_or_else(|| self.task.props().id)
+    }
 }

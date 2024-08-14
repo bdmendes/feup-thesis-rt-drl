@@ -1,7 +1,7 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::{
-    task::{Task, TimeUnit},
+    task::{Task, TaskId, TimeUnit},
     SimulatorMode, SimulatorTask,
 };
 
@@ -9,17 +9,21 @@ pub fn feasible_schedule_design_time(tasks: &[SimulatorTask]) -> bool {
     // At design time, we assess the full recurrence for testing the AMC feasibility.
     feasible_in_mode(tasks, SimulatorMode::LMode)
         && feasible_in_mode(tasks, SimulatorMode::HMode)
-        && feasible_mode_changes::<false>(tasks)
+        && feasible_mode_changes::<false>(tasks, &HashMap::new())
 }
 
-pub fn feasible_schedule_online(tasks: &[Rc<RefCell<SimulatorTask>>]) -> bool {
+pub fn feasible_schedule_online(
+    tasks: &[Rc<RefCell<SimulatorTask>>],
+    cached_response_times: &HashMap<TaskId, f32>,
+) -> bool {
     // At runtime, we have no "time" to calculate the full recurrence.
     // Therefore, we assume Ri=Ti which is the worst case scenario.
     let tasks = tasks.iter().map(|t| t.borrow().clone()).collect::<Vec<_>>();
-    feasible_in_mode(&tasks, SimulatorMode::LMode) && feasible_mode_changes::<true>(&tasks)
+    feasible_in_mode(&tasks, SimulatorMode::LMode)
+        && feasible_mode_changes::<true>(&tasks, cached_response_times)
 }
 
-fn response_time(
+pub fn response_time(
     task: &SimulatorTask,
     tasks: &[SimulatorTask],
     mode: SimulatorMode,
@@ -28,9 +32,7 @@ fn response_time(
     let mut response_time = wcet as f32;
 
     for _ in 0..100 {
-        let higher_priority_tasks = tasks
-            .iter()
-            .filter(|t| t.custom_priority < task.custom_priority);
+        let higher_priority_tasks = tasks.iter().filter(|t| t.priority() < task.priority());
         let interference = higher_priority_tasks
             .map(|t| {
                 (response_time / t.task.props().period as f32).ceil()
@@ -82,6 +84,7 @@ fn feasible_in_mode(tasks: &[SimulatorTask], mode: SimulatorMode) -> bool {
 fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     task: &SimulatorTask,
     tasks: &[SimulatorTask],
+    cached_response_times: &HashMap<TaskId, f32>,
 ) -> Option<TimeUnit> {
     if !matches!(task.task, Task::HTask(_)) {
         return None;
@@ -89,11 +92,15 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
 
     let interference_by_ltasks = tasks
         .iter()
-        .filter(|t| !matches!(t.task, Task::HTask(_)) && t.custom_priority < task.custom_priority)
+        .filter(|t| !matches!(t.task, Task::HTask(_)) && t.priority() < task.priority())
         .map(|t| {
-            ((response_time(task, tasks, SimulatorMode::LMode).unwrap() as f32)
-                / t.task.props().period as f32)
-                .ceil() as TimeUnit
+            let response_t =
+                if let Some(response_time) = cached_response_times.get(&t.task.props().id) {
+                    *response_time
+                } else {
+                    response_time(t, tasks, SimulatorMode::LMode).unwrap() as f32
+                };
+            (response_t / t.task.props().period as f32).ceil() as TimeUnit
                 * t.task.props().wcet_in_mode(SimulatorMode::LMode)
         })
         .sum::<TimeUnit>();
@@ -101,9 +108,7 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     if APPROXIMATE {
         let interference_by_htasks = tasks
             .iter()
-            .filter(|t| {
-                matches!(t.task, Task::HTask(_)) && t.custom_priority < task.custom_priority
-            })
+            .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority() < task.priority())
             .map(|t| {
                 (task.task.props().period as f32 / t.task.props().period as f32).ceil() as TimeUnit
                     * t.task.props().wcet_in_mode(SimulatorMode::HMode)
@@ -122,9 +127,7 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     for _ in 0..100 {
         let interference_by_htasks = tasks
             .iter()
-            .filter(|t| {
-                matches!(t.task, Task::HTask(_)) && t.custom_priority < task.custom_priority
-            })
+            .filter(|t| matches!(t.task, Task::HTask(_)) && t.priority() < task.priority())
             .map(|t| {
                 (total_response_time as f32 / t.task.props().period as f32).ceil() as TimeUnit
                     * t.task.props().wcet_in_mode(SimulatorMode::HMode)
@@ -145,17 +148,55 @@ fn response_time_in_mode_changes<const APPROXIMATE: bool>(
     None
 }
 
-fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &[SimulatorTask]) -> bool {
+fn feasible_mode_changes<const APPROXIMATE: bool>(
+    tasks: &[SimulatorTask],
+    cached_response_times: &HashMap<TaskId, f32>,
+) -> bool {
     let eligible_tasks = tasks
         .iter()
         .filter(|t| matches!(t.task, Task::HTask(_)))
         .map(|t| t.to_owned())
         .collect::<Vec<_>>();
 
+    // eq. 5
+    if APPROXIMATE {
+        for task in &eligible_tasks {
+            let interference = tasks
+                .iter()
+                .filter(|t| t.priority() < task.priority())
+                .map(|t| {
+                    let t_response_time_lo = if let Some(response_time) =
+                        cached_response_times.get(&t.task.props().id)
+                    {
+                        *response_time
+                    } else {
+                        response_time(t, tasks, SimulatorMode::LMode).unwrap() as f32
+                    };
+                    (t_response_time_lo / t.task.props().period as f32).ceil() as TimeUnit
+                        * t.task.props().wcet_in_mode(SimulatorMode::LMode)
+                })
+                .sum::<TimeUnit>();
+            let response_time_lo =
+                if let Some(response_time) = cached_response_times.get(&task.task.props().id) {
+                    *response_time
+                } else {
+                    response_time(task, tasks, SimulatorMode::LMode).unwrap() as f32
+                };
+            if task.task.props().wcet_in_mode(SimulatorMode::LMode) + interference
+                > response_time_lo as TimeUnit
+            {
+                return false;
+            }
+        }
+    }
+
+    // AMC-rtb (eq. 6)
     for task in &eligible_tasks {
-        if let Some(response_time) =
-            response_time_in_mode_changes::<APPROXIMATE>(task, eligible_tasks.as_slice())
-        {
+        if let Some(response_time) = response_time_in_mode_changes::<APPROXIMATE>(
+            task,
+            eligible_tasks.as_slice(),
+            cached_response_times,
+        ) {
             if response_time > task.task.props().period {
                 return false;
             }
@@ -169,6 +210,8 @@ fn feasible_mode_changes<const APPROXIMATE: bool>(tasks: &[SimulatorTask]) -> bo
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::simulator::{
         task::{TaskProps, TimeUnit},
         validation::{
@@ -439,11 +482,11 @@ mod tests {
         let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
         assert_eq!(
-            response_time_in_mode_changes::<false>(&task1, &tasks,),
+            response_time_in_mode_changes::<false>(&task1, &tasks, &HashMap::new()),
             Some(8)
         );
 
-        assert!(feasible_mode_changes::<false>(&tasks));
+        assert!(feasible_mode_changes::<false>(&tasks, &HashMap::new()));
     }
 
     #[test]
@@ -485,14 +528,14 @@ mod tests {
         let tasks = vec![task1.clone(), task2.clone(), task3.clone()];
 
         assert_eq!(
-            response_time_in_mode_changes::<false>(&task1, &tasks,),
+            response_time_in_mode_changes::<false>(&task1, &tasks, &HashMap::new()),
             Some(8)
         );
         assert_eq!(
-            response_time_in_mode_changes::<false>(&task2, &tasks,),
+            response_time_in_mode_changes::<false>(&task2, &tasks, &HashMap::new()),
             Some(2)
         );
 
-        assert!(feasible_mode_changes::<false>(&tasks));
+        assert!(feasible_mode_changes::<false>(&tasks, &HashMap::new()));
     }
 }

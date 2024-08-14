@@ -62,10 +62,11 @@ fn tune(tasks: Vec<SimulatorTask>) {
         file.set_len(0).unwrap();
         file.write_all(
             format!(
-                "parameters: NUMBER_TEST_SIMULATIONS: {}; TRAIN_INSTANTS: {}; TEST_INSTANTS: {}\n",
+                "parameters: NUMBER_TEST_SIMULATIONS: {}; TRAIN_INSTANTS: {}; TEST_INSTANTS: {}; NUMBER_RUNNABLES: {}\n",
                 number_test_simulations,
                 train_instants / 100000000,
-                test_instants / 100000000
+                test_instants / 100000000,
+                tasks.iter().map(|t| t.runnables.as_ref().unwrap().len()).sum::<usize>()
             )
             .as_bytes(),
         )
