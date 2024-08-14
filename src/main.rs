@@ -41,6 +41,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
         .expect("NUMBER_TEST_SIMULATIONS not set")
         .parse::<u64>()
         .unwrap();
+    sleep(Duration::from_secs(5));
     let mut hyper_iteration = 0;
 
     let pool = threadpool::ThreadPool::new(
@@ -59,6 +60,16 @@ fn tune(tasks: Vec<SimulatorTask>) {
             .open("out/placebo.txt")
             .unwrap();
         file.set_len(0).unwrap();
+        file.write_all(
+            format!(
+                "parameters: NUMBER_TEST_SIMULATIONS: {}; TRAIN_INSTANTS: {}; TEST_INSTANTS: {}\n",
+                number_test_simulations,
+                train_instants / 100000000,
+                test_instants / 100000000
+            )
+            .as_bytes(),
+        )
+        .unwrap();
 
         for _ in 0..number_test_simulations {
             let agent = Rc::new(RefCell::new(SimulatorAgent::new(
