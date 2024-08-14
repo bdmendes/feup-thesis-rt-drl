@@ -94,7 +94,7 @@ pub fn handle_end_event(
             .iter()
             .for_each(|a| a.apply(&mut simulator.tasks));
         if !matches!(action_parts[0], SimulatorActionPart::None) {
-            if !feasible_schedule_online(&simulator.tasks) {
+            if !feasible_schedule_online(&simulator.tasks, &simulator.cached_response_times) {
                 println!("Invalid action {:?}, reverting.", action_parts);
                 let reverse_action = action_parts.iter().map(|a| a.reverse()).collect::<Vec<_>>();
                 reverse_action

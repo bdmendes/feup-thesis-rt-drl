@@ -1,4 +1,5 @@
 use task::TaskProps;
+use validation::response_time;
 
 use self::task::{SimulatorTask, TaskId, TimeUnit};
 use crate::{
@@ -189,6 +190,7 @@ pub struct Simulator {
     now: TimeUnit,
     mode: SimulatorMode,
     running_history: Vec<Option<Rc<RefCell<SimulatorTask>>>>, // used if we want to return the full history
+    pub cached_response_times: HashMap<TaskId, f32>,
 }
 
 impl Simulator {
@@ -229,6 +231,15 @@ impl Simulator {
             mode: SimulatorMode::LMode,
             running_history: vec![],
             pending_agent_action: None,
+            cached_response_times: tasks
+                .iter()
+                .map(|t| {
+                    (
+                        t.task.props().id,
+                        response_time(t, &tasks, SimulatorMode::LMode).unwrap() as f32,
+                    )
+                })
+                .collect(),
         }
     }
 

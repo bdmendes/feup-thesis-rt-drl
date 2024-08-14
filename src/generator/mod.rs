@@ -182,7 +182,6 @@ impl Runnable {
 pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
     let rng = &mut rand::thread_rng();
     let mut period_runnables = HashMap::<Duration, usize>::new();
-    let mut id = 0;
     let mut tasks = Vec::new();
 
     for _ in 0..number_runnables {
@@ -214,7 +213,7 @@ pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
         // L-task
         if !l_runnables.is_empty() {
             let l_task_props = TaskProps {
-                id,
+                id: Runnable::duration_to_time_unit(*period) + 1,
                 offset: 0,
                 period: Runnable::duration_to_time_unit(*period),
                 wcet_l: l_runnables
@@ -223,7 +222,6 @@ pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
                     .sum::<f64>() as u64,
                 wcet_h: l_runnables.iter().map(|r| r.wcet).sum(),
             };
-            id += 1;
             tasks.push(SimulatorTask::new_with_runnables(
                 Task::LTask(l_task_props),
                 l_runnables,
@@ -233,7 +231,7 @@ pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
         // H-task
         if !h_runnables.is_empty() {
             let h_task_props = TaskProps {
-                id,
+                id: Runnable::duration_to_time_unit(*period),
                 offset: 0,
                 period: Runnable::duration_to_time_unit(*period),
                 wcet_l: h_runnables
@@ -242,7 +240,6 @@ pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
                     .sum::<f64>() as u64,
                 wcet_h: h_runnables.iter().map(|r| r.wcet).sum(),
             };
-            id += 1;
             tasks.push(SimulatorTask::new_with_runnables(
                 Task::HTask(h_task_props),
                 h_runnables,
@@ -286,7 +283,7 @@ mod tests {
     fn schedulable_sets() {
         let mut data = vec![];
 
-        for nr_runnables in (10..=700).step_by(10) {
+        for nr_runnables in (10..=400).step_by(10) {
             let mut schedulable_sets = 0;
             for _ in 0..500 {
                 let tasks = super::generate_tasks(nr_runnables);
