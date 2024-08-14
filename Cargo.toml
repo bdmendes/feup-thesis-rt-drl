@@ -11,3 +11,4 @@ rand = "0.8.5"
 serde = "1.0.203"
 statrs = "0.17.1"
 tch = {version = "0.15.0", features = ["download-libtorch"]}
+threadpool = "1.8.1"
