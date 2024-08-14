@@ -37,13 +37,15 @@ pub fn runnables_acets_uunifast(
             number_runnables,
         );
         if valid_utilizations(utilizations.clone(), min_acet, max_acet, period) {
-            return utilizations.iter().map(|u| (u * period).max(1.0)).collect();
+            let acets = utilizations
+                .iter()
+                .map(|u| (u * period))
+                .collect::<Vec<f64>>();
+            return acets;
         }
     }
 
-    (0..number_runnables)
-        .map(|_| ((avg_acet / period).max(1.0)))
-        .collect()
+    (0..number_runnables).map(|_| avg_acet).collect()
 }
 
 #[cfg(test)]
