@@ -87,8 +87,8 @@ static BCET_WCET_FACTORS: [[f64; 4]; 9] = [
 ];
 static RUNNABLES_PER_PERIOD_TAKE: [u8; 4] = [2, 3, 4, 5];
 static RUNNABLES_PER_PERIOD_TAKE_WEIGHTS: [u8; 4] = [30, 40, 20, 10];
-static WCET_L_PROBABILITIES_PER_PERIOD_L: [u64; 9] = [90, 90, 90, 80, 80, 80, 67, 67, 67];
-static WCET_L_PROBABILITIES_PER_PERIOD_H: [u64; 9] = [95, 95, 95, 90, 90, 90, 80, 80, 80];
+static WCET_L_PROBABILITIES_PER_PERIOD_L: [u64; 9] = [75, 75, 75, 67, 67, 67, 50, 50, 50];
+static WCET_L_PROBABILITIES_PER_PERIOD_H: [u64; 9] = [80, 80, 80, 75, 75, 75, 67, 67, 67];
 
 #[derive(Clone, Debug)]
 pub struct Runnable {
@@ -235,6 +235,7 @@ mod tests {
             for sample_nr in 0..10 {
                 println!("Sample {}: {}", sample_nr, task.sample_execution_time());
             }
+            println!();
         }
     }
 }
