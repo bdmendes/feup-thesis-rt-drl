@@ -34,15 +34,9 @@ pub fn handle_start_event(
         );
     }
     let next_exec_time = if simulator.random_execution_time {
-        Task::sample_execution_time(
-            task.borrow().acet,
-            task.borrow().bcet,
-            task.borrow().task.props().wcet_h,
-            &mut simulator.random_source,
-            crate::generator::TimeSampleDistribution::Pert,
-        )
+        task.borrow().sample_execution_time()
     } else {
-        task.borrow().acet
+        task.borrow().acet.unwrap()
     };
     job.borrow_mut().exec_time = next_exec_time;
     job.borrow_mut().run_time = 0;

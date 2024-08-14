@@ -1,7 +1,4 @@
-use probability::distribution::{Pert, Sample, Triangular};
-use probability::source::Xorshift128Plus;
-
-use crate::generator::TimeSampleDistribution;
+use crate::generator::Runnable;
 
 use super::SimulatorMode;
 
@@ -33,23 +30,6 @@ impl Task {
         match self {
             Task::LTask(props) => props,
             Task::HTask(props) => props,
-        }
-    }
-
-    pub fn sample_execution_time(
-        acet: TimeUnit,
-        bcet: TimeUnit,
-        wcet: TimeUnit,
-        source: &mut Xorshift128Plus,
-        dist: TimeSampleDistribution,
-    ) -> TimeUnit {
-        match dist {
-            TimeSampleDistribution::Triangular => {
-                Triangular::new(bcet as f64, wcet as f64, acet as f64).sample(source) as TimeUnit
-            }
-            TimeSampleDistribution::Pert => {
-                Pert::new(bcet as f64, acet as f64, wcet as f64).sample(source) as TimeUnit
-            }
         }
     }
 }
@@ -90,9 +70,10 @@ impl TaskProps {
 pub struct SimulatorTask {
     pub task: Task,
     pub custom_priority: Option<u64>,
-    pub acet: TimeUnit, // Average Case Execution Time
-    pub bcet: TimeUnit, // Best Case Execution Time
+    pub acet: Option<TimeUnit>, // Average Case Execution Time
+    pub bcet: Option<TimeUnit>, // Best Case Execution Time
     pub next_arrival: TimeUnit,
+    pub runnables: Option<Vec<Runnable>>,
 }
 
 impl SimulatorTask {
@@ -102,9 +83,21 @@ impl SimulatorTask {
         Self {
             task: task.clone(),
             custom_priority: None,
-            acet,
-            bcet,
+            acet: Some(acet),
+            bcet: Some(bcet),
             next_arrival: task.props().offset,
+            runnables: None,
+        }
+    }
+
+    pub fn new_with_runnables(task: Task, runnables: Vec<Runnable>) -> Self {
+        Self {
+            task: task.clone(),
+            custom_priority: None,
+            acet: None,
+            bcet: None,
+            next_arrival: task.props().offset,
+            runnables: Some(runnables),
         }
     }
 
@@ -113,43 +106,18 @@ impl SimulatorTask {
         Self {
             task: task.clone(),
             custom_priority: Some(priority),
-            acet,
-            bcet: acet,
+            acet: Some(acet),
+            bcet: None,
             next_arrival: task.props().offset,
+            runnables: None,
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use probability::source;
-
-    #[test]
-    fn sample_time() {
-        let (bcet, acet, wcet) = (3, 10, 30);
-        let mut source = source::default(42);
-
-        for _ in 0..10000 {
-            let time = super::Task::sample_execution_time(
-                acet,
-                bcet,
-                wcet,
-                &mut source,
-                super::TimeSampleDistribution::Pert,
-            );
-            print!("{}, ", time);
-        }
-        println!("\n");
-
-        for _ in 0..10000 {
-            let time = super::Task::sample_execution_time(
-                acet,
-                bcet,
-                wcet,
-                &mut source,
-                super::TimeSampleDistribution::Triangular,
-            );
-            print!("{}, ", time);
+    pub fn sample_execution_time(&self) -> TimeUnit {
+        if let Some(runnables) = &self.runnables {
+            runnables.iter().map(|r| r.sample_exec_time()).sum::<f64>() as TimeUnit
+        } else {
+            self.acet.unwrap()
         }
     }
 }

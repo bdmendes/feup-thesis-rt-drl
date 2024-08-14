@@ -1,4 +1,3 @@
-use probability::source;
 use task::TaskProps;
 
 use self::task::{SimulatorTask, TaskId, TimeUnit};
@@ -181,7 +180,6 @@ pub struct Simulator {
 
     // Needed during simulation.
     // Inited during constructor; should not reuse the same simulator for multiple simulations.
-    random_source: source::Xorshift128Plus, // TODO: make seed configurable
     jobs: HashMap<TaskId, Rc<RefCell<SimulatorJob>>>, // max 1 job per task
     running_job: Option<Rc<RefCell<SimulatorJob>>>,
     ready_jobs_queue: BinaryHeap<Rc<RefCell<SimulatorJob>>>, // except the one that is currently running
@@ -221,7 +219,6 @@ impl Simulator {
             agent,
             elapsed_times: vec![],
             memory_usage: vec![],
-            random_source: source::default(42),
             jobs: HashMap::new(),
             running_job: None,
             ready_jobs_queue: BinaryHeap::new(),
