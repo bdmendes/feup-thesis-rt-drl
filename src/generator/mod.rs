@@ -255,6 +255,8 @@ pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
 
 #[cfg(test)]
 mod tests {
+    use crate::simulator::validation::feasible_schedule_design_time;
+
     #[test]
     fn gen_tasks() {
         let tasks = super::generate_tasks(80);
@@ -278,5 +280,24 @@ mod tests {
             }
             println!();
         }
+    }
+
+    #[test]
+    fn schedulable_sets() {
+        let mut data = vec![];
+
+        for nr_runnables in (10..=700).step_by(10) {
+            let mut schedulable_sets = 0;
+            for _ in 0..500 {
+                let tasks = super::generate_tasks(nr_runnables);
+                if feasible_schedule_design_time(&tasks.clone()) {
+                    schedulable_sets += 1;
+                }
+            }
+            println!("{} {}", nr_runnables, schedulable_sets as f64 / 500.0);
+            data.push(schedulable_sets as f64 / 500.0);
+        }
+
+        println!("{:?}", data);
     }
 }

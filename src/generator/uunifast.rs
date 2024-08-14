@@ -20,6 +20,10 @@ fn valid_utilizations(utilizations: Vec<f64>, min_acet: f64, max_acet: f64, peri
         if min_acet + u * (period - min_acet) > max_acet {
             return false;
         }
+        if u * period < 20.0 {
+            // This is due to weibull not liking very small values.
+            return false;
+        }
     }
     true
 }
