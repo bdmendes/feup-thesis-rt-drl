@@ -48,7 +48,7 @@ def copy_out_directory(try_index):
 
 
 # Main loop to execute the process 50 times
-for try_index in range(2):
+for try_index in range(50):
     clear_directory(out_dir)
 
     if run_cargo():

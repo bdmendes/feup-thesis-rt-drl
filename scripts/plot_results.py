@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 import pandas as pd
 
-TOTAL_TRIALS = 10
+TOTAL_TRIALS = 50
 
 
 def collect_data(lines):
