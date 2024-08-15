@@ -252,7 +252,7 @@ impl SimulatorAgent {
     }
 
     pub fn activate(&mut self, simulator: &mut Simulator) {
-        println!("\nActivating agent.");
+        //println!("\nActivating agent.");
 
         // Build a state tensor from the simulator's state.
         let state = Self::history_to_input(self, simulator);
@@ -272,7 +272,7 @@ impl SimulatorAgent {
         let action_parts =
             raw_action.map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]);
         simulator.set_pending_agent_action(raw_action);
-        println!("Got action: {:?}", raw_action);
+        //println!("Got action: {:?}", raw_action);
 
         // Track events.
         if self.track {
@@ -308,7 +308,7 @@ impl SimulatorAgent {
             .map(|e| Self::event_to_reward(e, simulator))
             .sum::<f64>();
         self.cumulative_reward += reward;
-        println!("Reward: {}", reward);
+        //println!("Reward: {}", reward);
         println!("Cumulative reward: {}", self.cumulative_reward);
         self.reward_history.push(reward as f32);
         self.last_processed_event_index = self.events_history.len();
@@ -322,7 +322,7 @@ impl SimulatorAgent {
                 &state,
             );
 
-            println!("Pushing transition to replay memory: {:?}", transition);
+            //println!("Pushing transition to replay memory: {:?}", transition);
             match self.stage {
                 SimulatorAgentStage::DataCollection => {
                     if self.replay_memory.add_initial(transition) {
@@ -347,11 +347,11 @@ impl SimulatorAgent {
 
         // If we are not training, do nothing else.
         if self.stage != SimulatorAgentStage::Training {
-            println!("Not training. Skipping NN activity.");
+            //println!("Not training. Skipping NN activity.");
             return;
         }
 
-        println!("Training.");
+        // println!("Training.");
 
         let (b_state, b_action, b_reward, b_state_) =
             self.replay_memory.sample_batch(self.sample_batch_size);
@@ -371,11 +371,11 @@ impl SimulatorAgent {
         // We update the target network every `update_freq` steps.
         // This allows for a more stable learning process.
         if self.reward_history.len() % self.update_freq == 0 {
-            println!("Updating target network.");
+            // println!("Updating target network.");
             self.memory_target.copy(&self.memory_policy);
 
             self.epsilon = (self.epsilon * 0.95).max(0.3);
-            println!("Updated epsilon: {}", self.epsilon);
+            //  println!("Updated epsilon: {}", self.epsilon);
         }
     }
 
@@ -465,12 +465,12 @@ impl SimulatorAgent {
         let mut rng = rand::thread_rng();
         let random_number: f32 = rng.gen::<f32>();
         if random_number > epsilon || self.stage == SimulatorAgentStage::Reactive {
-            println!("Using policy.");
+            // println!("Using policy.");
             let value = tch::no_grad(|| policy.forward(storage, environment));
             let action_index = value.argmax(1, false).int64_value(&[]) as usize;
             self.index_to_action(action_index, simulator)
         } else {
-            println!("Using random action.");
+            // println!("Using random action.");
             self.sample_simulator_action(simulator)
         }
     }

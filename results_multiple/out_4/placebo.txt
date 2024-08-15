@@ -1,0 +1,11 @@
+parameters: NUMBER_TEST_SIMULATIONS: 10; TRAIN_INSTANTS: 100; TEST_INSTANTS: 10; NUMBER_RUNNABLES: 150
+Cumulative reward: -3397.7999999999856; mode changes to H: 1627; mode changes to L: 1626; task kills: 3521, task starts: 33772
+Cumulative reward: -3389.299999999978; mode changes to H: 1673; mode changes to L: 1672; task kills: 3406, task starts: 33627
+Cumulative reward: -3391.7999999999774; mode changes to H: 1649; mode changes to L: 1649; task kills: 3463, task starts: 33692
+Cumulative reward: -3403.199999999979; mode changes to H: 1638; mode changes to L: 1637; task kills: 3500, task starts: 33728
+Cumulative reward: -3413.599999999984; mode changes to H: 1688; mode changes to L: 1688; task kills: 3401, task starts: 33634
+Cumulative reward: -3620.5999999999744; mode changes to H: 1795; mode changes to L: 1795; task kills: 3381, task starts: 33504
+Cumulative reward: -3247.099999999985; mode changes to H: 1627; mode changes to L: 1626; task kills: 3367, task starts: 33739
+Cumulative reward: -3380.3999999999837; mode changes to H: 1676; mode changes to L: 1675; task kills: 3390, task starts: 33616
+Cumulative reward: -3373.799999999974; mode changes to H: 1661; mode changes to L: 1661; task kills: 3418, task starts: 33662
+Cumulative reward: -3517.499999999979; mode changes to H: 1686; mode changes to L: 1686; task kills: 3514, task starts: 33685

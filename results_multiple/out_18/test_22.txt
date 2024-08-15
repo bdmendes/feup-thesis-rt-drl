@@ -1,0 +1,11 @@
+hidden sizes: [18, 9]; sample batch size: 12; activation function: Sigmoid
+Cumulative reward: -5100.899999999995; mode changes to H: 2586; mode changes to L: 2586; task kills: 3311, task starts: 33821
+Cumulative reward: -5151.8999999999905; mode changes to H: 2641; mode changes to L: 2641; task kills: 3241, task starts: 33711
+Cumulative reward: -5096.299999999988; mode changes to H: 2606; mode changes to L: 2606; task kills: 3254, task starts: 33697
+Cumulative reward: -5066.099999999988; mode changes to H: 2576; mode changes to L: 2575; task kills: 3300, task starts: 33859
+Cumulative reward: -5025.199999999983; mode changes to H: 2550; mode changes to L: 2550; task kills: 3308, task starts: 33828
+Cumulative reward: -5039.699999999992; mode changes to H: 2544; mode changes to L: 2544; task kills: 3339, task starts: 33873
+Cumulative reward: -5102.4999999999945; mode changes to H: 2566; mode changes to L: 2566; task kills: 3351, task starts: 33805
+Cumulative reward: -5049.59999999999; mode changes to H: 2573; mode changes to L: 2572; task kills: 3289, task starts: 33854
+Cumulative reward: -4997.099999999997; mode changes to H: 2542; mode changes to L: 2542; task kills: 3308, task starts: 33949
+Cumulative reward: -4973.999999999988; mode changes to H: 2518; mode changes to L: 2518; task kills: 3334, task starts: 33960

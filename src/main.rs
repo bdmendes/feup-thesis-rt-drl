@@ -5,7 +5,7 @@ use agent::{
 };
 use generator::{generate_tasks, Runnable};
 use simulator::{task::SimulatorTask, Simulator};
-use std::{cell::RefCell, io::Write, rc::Rc, sync::mpsc::channel, thread::sleep, time::Duration};
+use std::{cell::RefCell, io::Write, rc::Rc, sync::mpsc::channel, time::Duration};
 
 pub mod agent;
 pub mod generator;
@@ -41,7 +41,6 @@ fn tune(tasks: Vec<SimulatorTask>) {
         .expect("NUMBER_TEST_SIMULATIONS not set")
         .parse::<u64>()
         .unwrap();
-    sleep(Duration::from_secs(5));
     let mut hyper_iteration = 0;
 
     let pool = threadpool::ThreadPool::new(
@@ -81,7 +80,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                 DEFAULT_LEARNING_RATE,
                 vec![8],
                 DEFAULT_SAMPLE_BATCH_SIZE,
-                ActivationFunction::Sigmoid,
+                ActivationFunction::ReLU,
                 &tasks,
             )));
             agent.borrow_mut().placebo_mode();
@@ -102,17 +101,12 @@ fn tune(tasks: Vec<SimulatorTask>) {
             vec![tasks.len(), tasks.len() / 2],
             vec![tasks.len(), tasks.len() / 2, tasks.len() / 4],
         ] {
-            for activation_function in [
-                ActivationFunction::Sigmoid,
-                ActivationFunction::ReLU,
-                ActivationFunction::Tanh,
-            ] {
-                hyper_iteration += 1;
-                let tasks = tasks.clone();
-                let hidden_sizes = hidden_sizes.clone();
-                let tx = tx.clone();
+            hyper_iteration += 1;
+            let tasks = tasks.clone();
+            let hidden_sizes = hidden_sizes.clone();
+            let tx = tx.clone();
 
-                pool.execute(move || {
+            pool.execute(move || {
                     let agent = Rc::new(RefCell::new(SimulatorAgent::new(
                         DEFAULT_MEM_SIZE,
                         DEFAULT_MIN_MEM_SIZE,
@@ -121,7 +115,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                         DEFAULT_LEARNING_RATE,
                         hidden_sizes.clone(),
                         sample_batch_size,
-                        activation_function,
+                        ActivationFunction::ReLU,
                         &tasks,
                     )));
 
@@ -140,7 +134,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
                         .open(format!("out/test_{hyper_iteration}.txt"))
                         .unwrap();
                     file.set_len(0).unwrap();
-                    file.write_all(format!("hidden sizes: {:?}; sample batch size: {}; activation function: {:?}\n", hidden_sizes, sample_batch_size, activation_function).as_bytes()).unwrap();
+                    file.write_all(format!("hidden sizes: {:?}; sample batch size: {}; activation function: {:?}\n", hidden_sizes, sample_batch_size, ActivationFunction::ReLU).as_bytes()).unwrap();
 
                     for _ in 0..number_test_simulations {
                         agent.borrow_mut().quit_training();
@@ -151,7 +145,6 @@ fn tune(tasks: Vec<SimulatorTask>) {
 
                     tx.send(()).unwrap();
                 }});
-            }
         }
     }
 
@@ -169,7 +162,6 @@ pub fn hp_tuning(number_runnables: usize) {
             return;
         }
         println!("Infeasible schedule, retrying...\n");
-        sleep(Duration::from_millis(100));
     }
 }
 
