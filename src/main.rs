@@ -148,7 +148,7 @@ fn tune(tasks: Vec<SimulatorTask>) {
         }
     }
 
-    for _ in 0..27 {
+    for _ in 0..9 {
         rx.recv().unwrap();
     }
 }

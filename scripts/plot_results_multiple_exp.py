@@ -121,10 +121,10 @@ def plot_best_hiperparameters():
     activation_functions_count = Counter(activation_functions)
 
     def save_bar_chart(data, title, xlabel, ylabel, filename):
-        plt.figure(figsize=(8, 6))
+        plt.figure(figsize=(6, 6))
+        plt.rcParams.update({"font.size": 30})
         plt.bar(data.keys(), data.values())
-        plt.title(title)
-        plt.xlabel(xlabel)
+        # plt.xlabel(xlabel)
         plt.ylabel(ylabel)
         plt.xticks(list(data.keys()))
         plt.tight_layout()

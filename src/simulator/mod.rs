@@ -349,7 +349,7 @@ impl Simulator {
         self.init_event_queue();
 
         while self.now < duration {
-            // println!("------------------");
+            println!("instant: {}", self.now);
             // println!(
             //     "instant: {}; events in queue: {}; ready jobs queue: {:?}",
             //     self.event_queue.peek().unwrap().borrow().time(),
