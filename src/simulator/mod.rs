@@ -349,19 +349,19 @@ impl Simulator {
         self.init_event_queue();
 
         while self.now < duration {
-            println!("------------------");
-            println!(
-                "instant: {}; events in queue: {}; ready jobs queue: {:?}",
-                self.event_queue.peek().unwrap().borrow().time(),
-                self.event_queue.len(),
-                self.ready_jobs_queue
-                    .iter()
-                    .map(|j| j.borrow().task.borrow().task.props().id)
-                    .collect::<Vec<_>>()
-            );
+            // println!("------------------");
+            // println!(
+            //     "instant: {}; events in queue: {}; ready jobs queue: {:?}",
+            //     self.event_queue.peek().unwrap().borrow().time(),
+            //     self.event_queue.len(),
+            //     self.ready_jobs_queue
+            //         .iter()
+            //         .map(|j| j.borrow().task.borrow().task.props().id)
+            //         .collect::<Vec<_>>()
+            // );
 
             let event = self.event_queue.pop().unwrap();
-            println!("Popped event: {:?}", event.borrow());
+            //  println!("Popped event: {:?}", event.borrow());
 
             if RETURN_FULL_HISTORY {
                 for _ in self.now..(event.borrow().time()) {

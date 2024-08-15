@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 import pandas as pd
 
-TOTAL_TRIALS = 50
+TOTAL_TRIALS = 10
 
 
 def collect_data(lines):
@@ -25,7 +25,7 @@ best_data = []
 
 for i in range(0, TOTAL_TRIALS):
     trial_data = []
-    dir_path = f"results/out_{i}"
+    dir_path = f"results_multiple/out_{i}"
     files = [f"{dir_path}/{f}" for f in listdir(dir_path) if isfile(f"{dir_path}/{f}")]
     for file in files:
         with open(file, "r") as f:
@@ -36,8 +36,11 @@ for i in range(0, TOTAL_TRIALS):
             else:
                 trial_data.append(data)
 
-    # find trial with best reward
-    best_data.append(max(trial_data, key=lambda x: sum(a[0] for a in x)))
+    # find trial with best reward and its index
+    best_trial = max(trial_data, key=lambda x: sum(a[0] for a in x))
+    best_trial_index = trial_data.index(best_trial)
+
+    best_data.append(best_trial)
 
 for i in range(0, TOTAL_TRIALS):
     print(f"Trial {i} - Placebo: {placebo_data[i]}, Best: {best_data[i]}")
@@ -49,8 +52,9 @@ def plot_data(index: int, label: str):
         """Convert the list of lists into a DataFrame for seaborn"""
         data = []
         for i, trial in enumerate(ranges):
-            for value in trial:
-                data.append({"Trial": f"{i+1}", "Value": value, "Type": label})
+            # Only take the first value in each list
+            value = trial[0] if trial else None
+            data.append({"Trial": f"{i+1}", "Value": value, "Type": label})
         return pd.DataFrame(data)
 
     y_placebo = [[entry[index] for entry in trial] for trial in placebo_data]
@@ -63,9 +67,16 @@ def plot_data(index: int, label: str):
     # Combine DataFrames
     combined_df = pd.concat([placebo_df, best_df])
 
-    # Create the box plot
-    plt.figure(figsize=(12, 6))
-    sns.boxplot(x="Trial", y="Value", hue="Type", data=combined_df)
+    # Create the line plot
+    plt.figure(figsize=(16, 10))
+    sns.lineplot(
+        x="Trial",
+        y="Value",
+        hue="Type",
+        data=combined_df,
+        palette={"Placebo": "red", "With Agent": "green"},
+        marker="o",  # Add markers to distinguish the points
+    )
 
     # Add titles and labels
     plt.xlabel("Task Set")
@@ -74,6 +85,13 @@ def plot_data(index: int, label: str):
 
     # Display the plot
     plt.tight_layout()
+
+    # Make font bigger
+    plt.rc("axes", labelsize=18)
+    plt.rc("xtick", labelsize=18)
+    plt.rc("ytick", labelsize=18)
+    plt.rc("legend", fontsize=18)
+    plt.rc("legend", title_fontsize=18)
 
     # Save the plot to a file
     plt.savefig(f"results/{label}.png")

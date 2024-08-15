@@ -16,5 +16,8 @@ Cargo.lock
 # Added by cargo
 /target
 
-# Outputs
-*.txt
+# Temp outputs
+!results/.gitkeep
+!out/.gitkeep
+out/
+results/

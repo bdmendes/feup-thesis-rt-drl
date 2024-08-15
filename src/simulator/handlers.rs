@@ -12,7 +12,7 @@ use super::{
 
 pub fn handle_start_event(
     task: Rc<RefCell<SimulatorTask>>,
-    time: TimeUnit,
+    _time: TimeUnit,
     simulator: &mut Simulator,
 ) {
     // Update the time of the next arrival
@@ -21,17 +21,17 @@ pub fn handle_start_event(
 
     // Initialize the new job
     let job = simulator.jobs.get(&task.borrow().task.props().id).unwrap();
-    println!(
-        "Handling start event for task: {}; instant: {}",
-        job.borrow().task.borrow().task.props().id,
-        time
-    );
+    // println!(
+    //     "Handling start event for task: {}; instant: {}",
+    //     job.borrow().task.borrow().task.props().id,
+    //     time
+    // );
     if job.borrow().is_agent {
-        println!(
-            "Scheduling agent at instant: {}, id: {}",
-            time,
-            job.borrow().task.borrow().task.props().id
-        );
+        // println!(
+        //     "Scheduling agent at instant: {}, id: {}",
+        //     time,
+        //     job.borrow().task.borrow().task.props().id
+        // );
     }
     let next_exec_time = if simulator.random_execution_time {
         task.borrow().sample_execution_time()
@@ -58,10 +58,10 @@ pub fn handle_start_event(
         context_switch(job.clone(), simulator);
     } else {
         simulator.ready_jobs_queue.push(job.clone());
-        println!(
-            "Pushed job to ready queue at start: {}",
-            job.borrow().task.borrow().task.props().id
-        );
+        // println!(
+        //     "Pushed job to ready queue at start: {}",
+        //     job.borrow().task.borrow().task.props().id
+        // );
     }
 }
 
@@ -78,15 +78,15 @@ pub fn handle_end_event(
     ))));
 
     let job = simulator.jobs.get(&task.borrow().task.props().id).unwrap();
-    println!(
-        "Handling end event for task: {}; instant: {}",
-        job.borrow().task.borrow().task.props().id,
-        time
-    );
+    // println!(
+    //     "Handling end event for task: {}; instant: {}",
+    //     job.borrow().task.borrow().task.props().id,
+    //     time
+    // );
 
     // If this is the agent, apply its actions
     if job.borrow().is_agent && simulator.pending_agent_action.is_some() {
-        println!("Applying agent's actions");
+        //println!("Applying agent's actions");
         let action_parts = simulator
             .pending_agent_action
             .map_or(vec![SimulatorActionPart::None], |(a, b, c)| vec![a, b, c]);
@@ -95,13 +95,13 @@ pub fn handle_end_event(
             .for_each(|a| a.apply(&mut simulator.tasks));
         if !matches!(action_parts[0], SimulatorActionPart::None) {
             if !feasible_schedule_online(&simulator.tasks, &simulator.cached_response_times) {
-                println!("Invalid action {:?}, reverting.", action_parts);
+                //println!("Invalid action {:?}, reverting.", action_parts);
                 let reverse_action = action_parts.iter().map(|a| a.reverse()).collect::<Vec<_>>();
                 reverse_action
                     .iter()
                     .for_each(|a| a.apply(&mut simulator.tasks));
             } else {
-                println!("Applied action {:?}", action_parts);
+                //println!("Applied action {:?}", action_parts);
             }
         }
     }
@@ -119,10 +119,10 @@ pub fn handle_end_event(
         std::cmp::max(simulator.now, task.borrow().next_arrival),
     )));
     simulator.event_queue.push(new_start_event.clone());
-    println!(
-        "Pushed start event for task: {}",
-        job.borrow().task.borrow().task.props().id
-    );
+    // println!(
+    //     "Pushed start event for task: {}",
+    //     job.borrow().task.borrow().task.props().id
+    // );
     job.borrow_mut().event = new_start_event;
 
     // Update runtime
@@ -136,10 +136,10 @@ pub fn handle_end_event(
         let is_ltask = matches!(job.borrow().task.borrow().task, Task::LTask(_));
 
         if is_ltask {
-            println!(
-                "Killing task: {}",
-                job.borrow().task.borrow().task.props().id
-            );
+            // println!(
+            //     "Killing task: {}",
+            //     job.borrow().task.borrow().task.props().id
+            // );
             simulator.push_event(Rc::new(RefCell::new(SimulatorEvent::TaskKill(
                 task.clone(),
                 simulator.now,
@@ -157,10 +157,10 @@ pub fn handle_end_event(
         }
     } else {
         let job = simulator.ready_jobs_queue.pop().unwrap();
-        println!(
-            "Popped job from ready queue: {}",
-            job.borrow().task.borrow().task.props().id
-        );
+        // println!(
+        //     "Popped job from ready queue: {}",
+        //     job.borrow().task.borrow().task.props().id
+        // );
         run_job(job, simulator);
     }
 }
@@ -173,15 +173,15 @@ fn run_job(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 
     if job.borrow().is_agent && simulator.agent.is_some() {
         let agent = simulator.agent.take().unwrap();
-        println!("Agent is running. instant={}", simulator.now);
+        // println!("Agent is running. instant={}", simulator.now);
         agent.borrow_mut().activate(simulator);
         simulator.agent = Some(agent);
     }
 
-    println!(
-        "Running job: {}",
-        job.borrow().task.borrow().task.props().id
-    );
+    // println!(
+    //     "Running job: {}",
+    //     job.borrow().task.borrow().task.props().id
+    // );
     context_switch(job, simulator);
 }
 
@@ -211,10 +211,10 @@ fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 
         // Add the running_job to the ready jobs queue
         simulator.ready_jobs_queue.push(running_job.clone());
-        println!(
-            "Pushed job to ready queue at context switch: {}",
-            running_job.borrow().task.borrow().task.props().id
-        );
+        // println!(
+        //     "Pushed job to ready queue at context switch: {}",
+        //     running_job.borrow().task.borrow().task.props().id
+        // );
     }
 
     // Schedule the termination event for this job (in the event queue)
@@ -222,10 +222,10 @@ fn context_switch(job: Rc<RefCell<SimulatorJob>>, simulator: &mut Simulator) {
 
     // Update the running job to the newly arrived job
     simulator.running_job = Some(job.clone());
-    println!(
-        "Context switch to job: {}",
-        job.borrow().task.borrow().task.props().id
-    );
+    // println!(
+    //     "Context switch to job: {}",
+    //     job.borrow().task.borrow().task.props().id
+    // );
 
     simulator.last_context_switch = simulator.now;
 }
@@ -254,14 +254,14 @@ fn schedule_termination_event(job: &mut SimulatorJob, simulator: &mut Simulator)
     job.event = event.clone();
 
     simulator.event_queue.push(event);
-    println!(
-        "Pushed end event for job: {}",
-        job.task.borrow().task.props().id
-    );
+    // println!(
+    //     "Pushed end event for job: {}",
+    //     job.task.borrow().task.props().id
+    // );
 }
 
 fn change_mode(to_mode: SimulatorMode, simulator: &mut Simulator) {
-    println!("Changing mode to {:?}", to_mode);
+    // println!("Changing mode to {:?}", to_mode);
 
     simulator.mode = to_mode;
     simulator.push_event(Rc::new(RefCell::new(SimulatorEvent::ModeChange(
@@ -271,7 +271,7 @@ fn change_mode(to_mode: SimulatorMode, simulator: &mut Simulator) {
 
     if simulator.mode == SimulatorMode::LMode {
         // Schedule the arrival of L-tasks.
-        println!("Scheduling L-tasks");
+        //   println!("Scheduling L-tasks");
         for task in simulator.tasks.iter() {
             if let Task::LTask(_) = task.borrow().task {
                 let start_event = Rc::new(RefCell::new(SimulatorEvent::Start(
@@ -279,15 +279,15 @@ fn change_mode(to_mode: SimulatorMode, simulator: &mut Simulator) {
                     std::cmp::max(simulator.now, task.borrow().next_arrival),
                 )));
                 simulator.event_queue.push(start_event);
-                println!(
-                    "Pushed start event for task: {}",
-                    task.borrow().task.props().id
-                );
+                // println!(
+                //     "Pushed start event for task: {}",
+                //     task.borrow().task.props().id
+                // );
             }
         }
     } else {
         // Dispense with the remaining L-tasks.
-        println!("Dispensing with L-tasks");
+        //  println!("Dispensing with L-tasks");
         simulator
             .event_queue
             .retain(|event| matches!(event.borrow().task().borrow().task, Task::HTask(_)));

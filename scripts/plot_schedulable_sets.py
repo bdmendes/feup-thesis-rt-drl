@@ -41,16 +41,21 @@ data = [
     0.0,
 ]
 data = [x * 100 for x in data]
+data = data[5:]
+data = data[:-5]
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-num_runnables = np.arange(10, 410, step=10)
+num_runnables = np.arange(60, 360, step=10)
 
-plt.tight_layout()
+plt.rcParams.update({"font.size": 18})
+plt.rcParams["axes.linewidth"] = 1.5
+plt.rcParams["lines.linewidth"] = 1.5
 plt.figure(figsize=(10, 6))
 sns.lineplot(x=num_runnables, y=data, marker="o")
 plt.xlabel("number of runnables")
 plt.ylabel("schedulable sets (%)")
-plt.savefig("results/schedulable_sets.png")
+plt.tight_layout()
+plt.savefig("results/schedulable_sets.pdf")

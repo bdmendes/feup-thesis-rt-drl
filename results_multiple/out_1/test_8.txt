@@ -1,0 +1,11 @@
+hidden sizes: [15, 7, 3]; sample batch size: 6; activation function: ReLU
+Cumulative reward: 1627.5999999999983; mode changes to H: 352; mode changes to L: 352; task kills: 1286, task starts: 36176
+Cumulative reward: 1588.5999999999965; mode changes to H: 352; mode changes to L: 352; task kills: 1328, task starts: 36206
+Cumulative reward: 1603.9999999999957; mode changes to H: 351; mode changes to L: 351; task kills: 1316, task starts: 36220
+Cumulative reward: 1461.5999999999963; mode changes to H: 359; mode changes to L: 359; task kills: 1440, task starts: 36196
+Cumulative reward: 1487.0999999999958; mode changes to H: 348; mode changes to L: 347; task kills: 1439, task starts: 36221
+Cumulative reward: 1530.8999999999971; mode changes to H: 363; mode changes to L: 363; task kills: 1362, task starts: 36189
+Cumulative reward: 2734.0000000000146; mode changes to H: 363; mode changes to L: 363; task kills: 157, task starts: 36170
+Cumulative reward: 1449.0999999999958; mode changes to H: 354; mode changes to L: 353; task kills: 1458, task starts: 36151
+Cumulative reward: 1611.499999999998; mode changes to H: 365; mode changes to L: 365; task kills: 1276, task starts: 36175
+Cumulative reward: 1589.7999999999965; mode changes to H: 367; mode changes to L: 367; task kills: 1295, task starts: 36188

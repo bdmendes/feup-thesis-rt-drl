@@ -1,0 +1,11 @@
+hidden sizes: [16, 8, 4]; sample batch size: 3; activation function: Tanh
+Cumulative reward: -4858.099999999986; mode changes to H: 2108; mode changes to L: 2108; task kills: 3455, task starts: 28129
+Cumulative reward: -4871.299999999979; mode changes to H: 2094; mode changes to L: 2094; task kills: 3495, task starts: 28117
+Cumulative reward: -4858.199999999979; mode changes to H: 2085; mode changes to L: 2084; task kills: 3499, task starts: 28108
+Cumulative reward: -4929.79999999997; mode changes to H: 2071; mode changes to L: 2070; task kills: 3599, task starts: 28112
+Cumulative reward: -4939.599999999978; mode changes to H: 2139; mode changes to L: 2138; task kills: 3468, task starts: 28064
+Cumulative reward: -4852.199999999982; mode changes to H: 2079; mode changes to L: 2079; task kills: 3505, task starts: 28108
+Cumulative reward: -4840.799999999966; mode changes to H: 2099; mode changes to L: 2099; task kills: 3453, task starts: 28102
+Cumulative reward: -4767.599999999977; mode changes to H: 2028; mode changes to L: 2028; task kills: 3531, task starts: 28194
+Cumulative reward: -4715.499999999978; mode changes to H: 1957; mode changes to L: 1957; task kills: 3635, task starts: 28335
+Cumulative reward: -4939.999999999986; mode changes to H: 2089; mode changes to L: 2089; task kills: 3573, task starts: 28110
