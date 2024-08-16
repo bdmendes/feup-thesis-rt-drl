@@ -183,7 +183,7 @@ pub fn activation_times() {
         )));
         agent.borrow_mut().quit_training();
         let mut simulator = Simulator::new(tasks.clone(), true, Some(agent.clone()));
-        simulator.fire::<true>(Runnable::duration_to_time_unit(Duration::from_secs(10)));
+        simulator.fire::<true>(Runnable::duration_to_time_unit(Duration::from_secs(1)));
         let mut file = std::fs::File::create("results/activation_times_1.txt").unwrap();
         simulator.elapsed_times.iter().for_each(|time| {
             file.write_all(format!("{}\n", time.as_micros()).as_bytes())
@@ -206,7 +206,7 @@ pub fn activation_times() {
         )));
         agent.borrow_mut().quit_training();
         let mut simulator = Simulator::new(tasks.clone(), true, Some(agent.clone()));
-        simulator.fire::<true>(Runnable::duration_to_time_unit(Duration::from_secs(10)));
+        simulator.fire::<true>(Runnable::duration_to_time_unit(Duration::from_secs(1)));
         let mut file = std::fs::File::create("results/activation_times_3.txt").unwrap();
         simulator.elapsed_times.iter().for_each(|time| {
             file.write_all(format!("{}\n", time.as_micros()).as_bytes())
