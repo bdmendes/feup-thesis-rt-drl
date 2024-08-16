@@ -25,7 +25,7 @@ best_data = []
 
 for i in range(0, TOTAL_TRIALS):
     trial_data = []
-    dir_path = f"results_multiple/out_{i}"
+    dir_path = f"results/out_{i}"
     files = [f"{dir_path}/{f}" for f in listdir(dir_path) if isfile(f"{dir_path}/{f}")]
     for file in files:
         with open(file, "r") as f:
