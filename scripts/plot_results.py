@@ -88,6 +88,25 @@ def plot_data(index: int, label: str):
     # Combine DataFrames
     combined_df = pd.concat([placebo_df_150, best_df_150, placebo_df_250, best_df_250])
 
+    # Calculate the extremes and quantiles
+    stats = combined_df.groupby(["Runnables", "Type"])["Value"].describe(
+        percentiles=[0.25, 0.5, 0.75]
+    )
+
+    # Prepare the output directory
+    import os
+
+    output_dir = "results"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Write the stats to a text file
+    stats_file = os.path.join(output_dir, f"cmp_stats_{label}.txt")
+    with open(stats_file, "w") as f:
+        f.write("Comparison of AMC+ vs Enhanced\n")
+        f.write("=====================================\n")
+        f.write(stats[["min", "25%", "50%", "75%", "max"]].to_string())
+        f.write("\n\n")
+
     # Create the box plot
     plt.figure(figsize=(10, 10))
     sns.boxplot(

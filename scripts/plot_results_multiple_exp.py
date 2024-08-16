@@ -91,7 +91,7 @@ def plot_data(index: int, label: str):
     # Add titles and labels
     plt.xlabel("Task Set")
     plt.ylabel(label)
-    plt.legend(title="Schedule")
+    plt.legend(title="Schedule", loc="upper right")
 
     # Display the plot
     plt.tight_layout()
