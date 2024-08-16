@@ -16,7 +16,6 @@ pub enum ActivationFunction {
 pub struct Policy {
     layers: Vec<LinearLayer>,
     activation: ActivationFunction,
-    freed: bool,
 }
 
 impl Policy {
@@ -50,25 +49,12 @@ impl Policy {
             number_actions as i64,
         ));
 
-        Self {
-            layers,
-            activation,
-            freed: false,
-        }
-    }
-
-    pub fn free(&mut self, storage: &mut TensorStorage) {
-        self.layers.iter().for_each(|l| {
-            storage.free_at(*l.params.get(&"W".to_string()).unwrap());
-            storage.free_at(*l.params.get(&"b".to_string()).unwrap());
-        });
-        self.freed = true;
+        Self { layers, activation }
     }
 }
 
 impl ComputeModel for Policy {
     fn forward(&self, storage: &TensorStorage, input: &Tensor) -> Tensor {
-        assert!(!self.freed);
         let mut o = self.layers.first().unwrap().forward(storage, input);
 
         for i in 0..self.layers.len() - 1 {

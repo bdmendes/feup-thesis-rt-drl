@@ -1,14 +1,16 @@
-use ctor::ctor;
-use probability::distribution::Pert;
-use probability::source::Xorshift128Plus;
-use probability::{
-    distribution::{Sample, Triangular, Uniform},
-    source::{self},
+use crate::simulator::{
+    task::{SimulatorTask, Task, TaskProps, TimeUnit},
+    SimulatorMode,
 };
-use rand::prelude::SliceRandom;
-use std::time::Duration;
+use ctor::ctor;
+use rand::prelude::{Distribution, SliceRandom};
+use rand::Rng;
+use statrs::distribution::Uniform;
+use std::{collections::HashMap, time::Duration};
+use weibull::RunnableWeibull;
 
-use crate::simulator::task::{SimulatorTask, Task, TaskProps, TimeUnit};
+mod uunifast;
+mod weibull;
 
 // Data gathered from "Real World Automotive Benchmarks For Free", from
 // Simon Kramer, Dirk Ziegenbein, Arne Hamann, a corporate research paper
@@ -24,7 +26,6 @@ static RUNNABLE_PERIODS: [Duration; 9] = [
     Duration::from_millis(200),
     Duration::from_millis(1000),
 ];
-static RUNNABLE_SHARES: [TimeUnit; 9] = [3, 2, 2, 25, 25, 3, 20, 1, 4];
 #[ctor]
 static MIN_AVG_MAX_AVG_EXECUTION_TIMES: [[Duration; 3]; 9] = [
     [
@@ -73,7 +74,7 @@ static MIN_AVG_MAX_AVG_EXECUTION_TIMES: [[Duration; 3]; 9] = [
         Duration::from_micros(46).mul_f32(0.01),
     ],
 ];
-static BCET_WCET_FACTORS: [[f32; 4]; 9] = [
+static BCET_WCET_FACTORS: [[f64; 4]; 9] = [
     [0.19, 0.92, 1.30, 29.11],
     [0.12, 0.89, 1.54, 19.04],
     [0.17, 0.94, 1.13, 18.44],
@@ -84,77 +85,83 @@ static BCET_WCET_FACTORS: [[f32; 4]; 9] = [
     [0.45, 0.98, 1.03, 4.90],
     [0.68, 0.80, 1.84, 4.75],
 ];
-static RUNNABLES_PER_PERIOD_TAKE: [u8; 4] = [2, 3, 4, 5];
-static RUNNABLES_PER_PERIOD_TAKE_WEIGHTS: [u8; 4] = [30, 40, 20, 10];
+static RUNNABLE_DISTRIBUTION_PER_PERIOD: [u64; 9] = [3, 2, 2, 25, 25, 3, 20, 1, 4];
+static WCET_L_PROBABILITIES_PER_PERIOD_L: [u64; 9] = [75, 75, 75, 67, 67, 67, 50, 50, 50];
+static WCET_L_PROBABILITIES_PER_PERIOD_H: [u64; 9] = [80, 80, 80, 75, 75, 75, 67, 67, 67];
 
-#[derive(Debug, Clone, Copy)]
-pub enum TimeSampleDistribution {
-    Triangular,
-    Pert,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Runnable {
     // Given a runnable with a given period,
     // the average execution time depends on
     // the nature of the task.
-    acet: TimeUnit,
+    pub acet: TimeUnit,
 
     // The best case exectution time (BCET) and the worst case
     // execution time (WCET) are calculated given a factor
     // f oscillating between f_min and f_max.
-    bcet: TimeUnit,
-    wcet: TimeUnit,
+    pub bcet: TimeUnit,
+    pub wcet: TimeUnit,
+
+    // Used for sampling the execution time of the runnable.
+    weibull: RunnableWeibull,
+}
+
+impl PartialEq for Runnable {
+    fn eq(&self, other: &Self) -> bool {
+        self.acet == other.acet && self.bcet == other.bcet && self.wcet == other.wcet
+    }
 }
 
 impl Runnable {
-    fn generate_new(
-        period: Duration,
-        source: &mut Xorshift128Plus,
-        dist: TimeSampleDistribution,
-    ) -> Runnable {
-        let index = RUNNABLE_PERIODS.iter().position(|&x| x == period).unwrap();
+    fn new_batch(period: Duration, number: usize) -> Vec<Runnable> {
+        let period_index = RUNNABLE_PERIODS.iter().position(|&x| x == period).unwrap();
+        let [min_acet, avg_acet, max_acet] = MIN_AVG_MAX_AVG_EXECUTION_TIMES[period_index];
 
-        // We'll determine the average execution time of this runnable
-        // using a pert distribution, since we have the minimum,
-        // average and maximum.
-        let [min_acet, avg_acet, max_acet] = MIN_AVG_MAX_AVG_EXECUTION_TIMES[index];
-        let acet = match dist {
-            TimeSampleDistribution::Triangular => Triangular::new(
-                Self::duration_to_time_unit(min_acet) as f64,
-                Self::duration_to_time_unit(max_acet) as f64,
-                Self::duration_to_time_unit(avg_acet) as f64,
-            )
-            .sample(source),
-            TimeSampleDistribution::Pert => Pert::new(
-                Self::duration_to_time_unit(min_acet) as f64,
-                Self::duration_to_time_unit(avg_acet) as f64,
-                Self::duration_to_time_unit(max_acet) as f64,
-            )
-            .sample(source),
-        };
+        let acets = uunifast::runnables_acets_uunifast(
+            number,
+            Self::duration_to_time_unit(avg_acet) as f64,
+            Self::duration_to_time_unit(min_acet) as f64,
+            Self::duration_to_time_unit(max_acet) as f64,
+            Self::duration_to_time_unit(period) as f64,
+        );
+        assert_eq!(acets.len(), number);
+        let rng = &mut rand::thread_rng();
 
-        // We'll determine the best case execution time (BCET) and the worst
-        // case execution time (WCET) using a factor f oscillating between
-        // f_min and f_max.
-        let [bcet_fmin, bcet_fmax, wcet_fmin, wcet_fmax] = BCET_WCET_FACTORS[index];
-        let bcet_f = Uniform::new(bcet_fmin as f64, bcet_fmax as f64).sample(source);
-        let wcet_f = Uniform::new(wcet_fmin as f64, wcet_fmax as f64).sample(source);
-
-        Runnable {
-            acet: acet as TimeUnit,
-            bcet: (acet * bcet_f) as TimeUnit,
-            wcet: (acet * wcet_f) as TimeUnit,
-        }
+        acets
+            .iter()
+            .map(|&acet| {
+                let [bcet_fmin, bcet_fmax, wcet_fmin, wcet_fmax] = BCET_WCET_FACTORS[period_index];
+                let bcet_f = Uniform::new(bcet_fmin, bcet_fmax).unwrap().sample(rng);
+                let wcet_f = Uniform::new(wcet_fmin, wcet_fmax).unwrap().sample(rng);
+                let bcet = acet * bcet_f;
+                let wcet = acet * wcet_f;
+                Runnable {
+                    acet: acet as TimeUnit,
+                    bcet: bcet as TimeUnit,
+                    wcet: wcet as TimeUnit,
+                    weibull: RunnableWeibull::new(bcet, acet, wcet),
+                }
+            })
+            .collect()
     }
 
-    fn wcet_l_estimate(&self, source: &mut Xorshift128Plus) -> TimeUnit {
-        if self.acet == self.wcet {
-            return self.acet;
-        }
+    fn wcet_l_estimate(&self, period: Duration, mode: SimulatorMode) -> f64 {
+        // Sample execution times 100 times and sort them.
+        let rng = &mut rand::thread_rng();
+        let mut samples = (0..100)
+            .map(|_| self.weibull.sample(rng))
+            .collect::<Vec<f64>>();
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        // The WCET_L is a random value between the ACET and the WCET.
-        Uniform::new(self.acet as f64, self.wcet as f64).sample(source) as TimeUnit
+        // Find the budget assurance for this period.
+        let period_index = RUNNABLE_PERIODS.iter().position(|&x| x == period).unwrap();
+        let wcet_l_probability = match mode {
+            SimulatorMode::LMode => WCET_L_PROBABILITIES_PER_PERIOD_L[period_index],
+            SimulatorMode::HMode => WCET_L_PROBABILITIES_PER_PERIOD_H[period_index],
+        };
+
+        // Return the execution time that satisfies the budget assurance.
+        samples[wcet_l_probability as usize]
     }
 
     pub fn duration_to_time_unit(duration: Duration) -> TimeUnit {
@@ -162,82 +169,82 @@ impl Runnable {
         // This allows us to represent us with a precision of 10^-2.
         (duration.as_secs_f64() * 100_000_000.0) as TimeUnit
     }
+
+    pub fn sample_exec_time(&self) -> f64 {
+        let rng = &mut rand::thread_rng();
+        let s = self.weibull.sample(rng);
+        assert!(s <= self.wcet as f64);
+        assert!(s >= self.bcet as f64);
+        s.max(1.0)
+    }
 }
 
-pub fn generate_tasks(
-    lmode_prob: f64,
-    mut number_runnables: usize,
-    dist: TimeSampleDistribution,
-) -> Vec<SimulatorTask> {
-    assert!((0.0..=1.0).contains(&lmode_prob));
-    assert!(number_runnables > 0);
-
+pub fn generate_tasks(number_runnables: usize) -> Vec<SimulatorTask> {
+    let rng = &mut rand::thread_rng();
+    let mut period_runnables = HashMap::<Duration, usize>::new();
     let mut tasks = Vec::new();
 
-    let mut source = source::default(42);
-    let mut rng = rand::thread_rng();
-
-    let is_ltask_dist = Uniform::new(0.0, 1.0);
-    let offset_dist = Uniform::new(
-        0.0,
-        Runnable::duration_to_time_unit(RUNNABLE_PERIODS[0] / 10) as f64,
-    );
-
-    let mut id = 0;
-    while number_runnables > 0 {
-        // Choose a period.
-        let period = *RUNNABLE_PERIODS
-            .choose_weighted(&mut rng, |p| {
-                let index = RUNNABLE_PERIODS.iter().position(|&x| x == *p).unwrap();
-                RUNNABLE_SHARES[index]
+    for _ in 0..number_runnables {
+        let chosen_period = RUNNABLE_PERIODS
+            .choose_weighted(rng, |&x| {
+                RUNNABLE_DISTRIBUTION_PER_PERIOD
+                    [RUNNABLE_PERIODS.iter().position(|&y| y == x).unwrap()]
             })
             .unwrap();
-        let period_in_units = Runnable::duration_to_time_unit(period);
+        period_runnables
+            .entry(*chosen_period)
+            .and_modify(|e| *e += 1)
+            .or_insert(1);
+    }
 
-        // Calculate number of runnables in this period.
-        let runnables_per_period_take = *RUNNABLES_PER_PERIOD_TAKE
-            .choose_weighted(&mut rng, |p| {
-                let index = RUNNABLES_PER_PERIOD_TAKE
+    for period in period_runnables.keys() {
+        let runnables = Runnable::new_batch(*period, period_runnables[period]);
+        let l_runnables = runnables
+            .iter()
+            .filter(|_| rng.gen_bool(0.5))
+            .cloned()
+            .collect::<Vec<Runnable>>();
+        let h_runnables = runnables
+            .iter()
+            .filter(|r| !l_runnables.contains(r))
+            .cloned()
+            .collect::<Vec<Runnable>>();
+
+        // L-task
+        if !l_runnables.is_empty() {
+            let l_task_props = TaskProps {
+                id: Runnable::duration_to_time_unit(*period) + 1,
+                offset: 0,
+                period: Runnable::duration_to_time_unit(*period),
+                wcet_l: l_runnables
                     .iter()
-                    .position(|&x| x == *p)
-                    .unwrap();
-                RUNNABLES_PER_PERIOD_TAKE_WEIGHTS[index]
-            })
-            .unwrap();
+                    .map(|r| r.wcet_l_estimate(*period, SimulatorMode::LMode))
+                    .sum::<f64>() as u64,
+                wcet_h: l_runnables.iter().map(|r| r.wcet).sum(),
+            };
+            tasks.push(SimulatorTask::new_with_runnables(
+                Task::LTask(l_task_props),
+                l_runnables,
+            ));
+        }
 
-        // Generate a number of runnables.
-        let runnables = (0..runnables_per_period_take)
-            .map(|_| Runnable::generate_new(period, &mut source, dist))
-            .collect::<Vec<_>>();
-        number_runnables = number_runnables.saturating_sub(runnables.len());
-
-        // Calculate offset for this take.
-        let offset = offset_dist.sample(&mut source) as TimeUnit;
-
-        // Create a task with all these runnables.
-        let is_ltask = is_ltask_dist.sample(&mut source) < lmode_prob;
-        let props = TaskProps {
-            id,
-            wcet_l: runnables
-                .iter()
-                .map(|r| r.wcet_l_estimate(&mut source))
-                .sum(),
-            wcet_h: runnables.iter().map(|r| r.wcet).sum(),
-            offset,
-            period: period_in_units,
-        };
-        id += 1;
-        let task = if is_ltask {
-            Task::LTask(props)
-        } else {
-            Task::HTask(props)
-        };
-        tasks.push(SimulatorTask {
-            task,
-            priority: period_in_units,
-            acet: runnables.iter().map(|r| r.acet).sum(),
-            bcet: runnables.iter().map(|r| r.bcet).sum(),
-        });
+        // H-task
+        if !h_runnables.is_empty() {
+            let h_task_props = TaskProps {
+                id: Runnable::duration_to_time_unit(*period),
+                offset: 0,
+                period: Runnable::duration_to_time_unit(*period),
+                wcet_l: h_runnables
+                    .iter()
+                    .map(|r| r.wcet_l_estimate(*period, SimulatorMode::HMode))
+                    .sum::<f64>() as u64,
+                wcet_h: h_runnables.iter().map(|r| r.wcet).sum(),
+            };
+            tasks.push(SimulatorTask::new_with_runnables(
+                Task::HTask(h_task_props),
+                h_runnables,
+            ));
+        }
     }
 
     tasks
@@ -245,59 +252,49 @@ pub fn generate_tasks(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        generator::TimeSampleDistribution::Pert,
-        simulator::validation::feasible_schedule_design_time,
-    };
-
-    use super::RUNNABLE_PERIODS;
+    use crate::simulator::validation::feasible_schedule_design_time;
 
     #[test]
-    fn schedulability_lmode03() {
-        let l_mode_prob = 0.3;
-        for number_taks in 1..150 {
-            let is_schedulable_count = (0..1000)
-                .map(|_| {
-                    let tasks = super::generate_tasks(l_mode_prob, number_taks, Pert);
-                    feasible_schedule_design_time(&tasks)
-                })
-                .filter(|&x| x)
-                .count() as f64;
-            print!("{}, ", is_schedulable_count / 1000.0);
+    fn gen_tasks() {
+        let tasks = super::generate_tasks(80);
+
+        for task in tasks {
+            println!(
+                "Task: {:?}, mode: {}",
+                task.task.props().id,
+                match task.task {
+                    super::Task::LTask(_) => "L",
+                    super::Task::HTask(_) => "H",
+                }
+            );
+            println!("Period: {}", task.task.props().period);
+            println!("WCET_L: {}", task.task.props().wcet_l);
+            for runnable in task.clone().runnables.unwrap() {
+                println!("BCET: {}, WCET: {}", runnable.bcet, runnable.wcet);
+            }
+            for sample_nr in 0..10 {
+                println!("Sample {}: {}", sample_nr, task.sample_execution_time());
+            }
+            println!();
         }
     }
 
     #[test]
-    fn schedulability_lmode06() {
-        let l_mode_prob = 0.6;
-        for number_taks in 1..150 {
-            let is_schedulable_count = (0..1000)
-                .map(|_| {
-                    let tasks = super::generate_tasks(l_mode_prob, number_taks, Pert);
-                    feasible_schedule_design_time(&tasks)
-                })
-                .filter(|&x| x)
-                .count() as f64;
-            print!("{}, ", is_schedulable_count / 1000.0);
-        }
-    }
+    fn schedulable_sets() {
+        let mut data = vec![];
 
-    #[test]
-    fn utilization() {
-        let tasks = super::generate_tasks(0.5, 100000, Pert);
-        for period in RUNNABLE_PERIODS {
-            let period_units = super::Runnable::duration_to_time_unit(period);
-            let tasks_with_this_period = tasks
-                .iter()
-                .filter(|t| t.task.props().period == period_units)
-                .take(1000)
-                .collect::<Vec<_>>();
-            let utilizations = tasks_with_this_period
-                .iter()
-                .map(|t| t.task.props().utilization())
-                .filter(|&u| u <= 1.0)
-                .collect::<Vec<_>>();
-            println!("{:?},", utilizations);
+        for nr_runnables in (10..=400).step_by(10) {
+            let mut schedulable_sets = 0;
+            for _ in 0..500 {
+                let tasks = super::generate_tasks(nr_runnables);
+                if feasible_schedule_design_time(&tasks.clone()) {
+                    schedulable_sets += 1;
+                }
+            }
+            println!("{} {}", nr_runnables, schedulable_sets as f64 / 500.0);
+            data.push(schedulable_sets as f64 / 500.0);
         }
+
+        println!("{:?}", data);
     }
 }

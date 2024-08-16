@@ -16,5 +16,6 @@ Cargo.lock
 # Added by cargo
 /target
 
-# Outputs
-*.txt
+# Temp outputs
+out**/
+results**/

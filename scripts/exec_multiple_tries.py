@@ -20,9 +20,24 @@ def clear_directory(directory):
 
 # Function to run the cargo command
 def run_cargo():
-    process = subprocess.run(
-        ["cargo", "run", "--release"], capture_output=True, text=True
+    command = ["cargo", "run", "--release"]
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
+
+    # Read output line by line as it becomes available
+    for line in iter(process.stdout.readline, ""):
+        print(line.strip())
+
+    # Ensure the process has finished
+    process.stdout.close()
+    process.wait()
+
+    # Check if there was any error output
+    stderr = process.stderr.read()
+    if stderr:
+        print("stderr:", stderr.strip())
+
     return process.returncode == 0
 
 

@@ -1,94 +1,123 @@
 from genericpath import isfile
 from os import listdir
 import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import pandas as pd
 
 TOTAL_TRIALS = 50
+placebo_data_150 = []
+best_data_150 = []
+placebo_data_250 = []
+best_data_250 = []
 
 
-def collect_data(lines):
-    parts = lines[0].split(" ")
-    reward = int(float(parts[2][:-1]))
-    mode_changes = int(parts[7][:-1])
-    task_kills = int(parts[15][:-1])
-    task_starts = int(parts[18][:-1])
-    return (reward, mode_changes, task_kills, task_starts)
+def read():
+    def collect_data(lines):
+        res = []
+        for line in lines:
+            parts = line.split(" ")
+            reward = int(float(parts[2][:-1]))
+            mode_changes = int(parts[7][:-1])
+            task_kills = int(parts[15][:-1])
+            task_starts = int(parts[18][:-1])
+            res.append([reward, mode_changes, task_kills, task_starts])
+        return res
 
+    for path in ["results_150", "results_250"]:
+        for i in range(0, TOTAL_TRIALS):
+            trial_data = []
+            dir_path = f"{path}/out_{i}"
+            files = [
+                f"{dir_path}/{f}"
+                for f in listdir(dir_path)
+                if isfile(f"{dir_path}/{f}")
+            ]
+            for file in files:
+                with open(file, "r") as f:
+                    lines = f.readlines()
+                    data = collect_data(lines[1:])
+                    placebo_data = (
+                        placebo_data_150 if "150" in dir_path else placebo_data_250
+                    )
+                    if "placebo" in file:
+                        placebo_data.append(data)
+                    else:
+                        trial_data.append(data)
 
-placebo_data = []
-best_data = []
+            # find trial with best reward and its index
+            best_trial = max(trial_data, key=lambda x: sum(a[0] for a in x))
+            best_trial_index = trial_data.index(best_trial)
 
-for i in range(0, TOTAL_TRIALS):
-    trial_data = []
-    dir_path = f"results/out_{i}"
-    files = [f"{dir_path}/{f}" for f in listdir(dir_path) if isfile(f"{dir_path}/{f}")]
-    for file in files:
-        with open(file, "r") as f:
-            lines = f.readlines()
-            data = collect_data(lines)
-            if "placebo" in file:
-                placebo_data.append(data)
-            else:
-                trial_data.append(data)
-    # find trial with best reward
-    best_data.append(max(trial_data, key=lambda x: x[0]))
+            best_data = best_data_150 if "150" in dir_path else best_data_250
+            best_data.append(best_trial)
 
-for i in range(0, TOTAL_TRIALS):
-    print(f"Trial {i} - Placebo: {placebo_data[i]}, Best: {best_data[i]}")
+    for i in range(0, TOTAL_TRIALS):
+        print(f"Trial {i} - Placebo: {placebo_data[i]}, Best: {best_data[i]}")
 
 
 def plot_data(index: int, label: str):
-    # remove outliers: trials where placebo vs best is more than 100% different
-    placebo_data_filtered = []
-    best_data_filtered = []
-    for i in range(0, TOTAL_TRIALS):
-        is_outlier = False
-        for j in range(0, 4):
-            if abs(placebo_data[i][j] / max(best_data[i][j], 1)) > 20:
-                is_outlier = True
-                break
-        if not is_outlier:
-            placebo_data_filtered.append(placebo_data[i])
-            best_data_filtered.append(best_data[i])
-        else:
-            print(f"Trial {i} is an outlier")
-    print(f"Filtered {TOTAL_TRIALS - len(placebo_data_filtered)} outliers\n")
+    # Prepare data for seaborn
+    def prepare_data(ranges, label, runnable_count):
+        """Convert the list of lists into a DataFrame for seaborn"""
+        data = []
+        for i, trial in enumerate(ranges):
+            for value in trial:
+                data.append(
+                    {
+                        "Trial": f"{i+1}",
+                        "Value": value,
+                        "Type": label,
+                        "Runnables": runnable_count,
+                    }
+                )
+        return pd.DataFrame(data)
 
-    placebo_data_filtered = placebo_data_filtered[:25]
-    best_data_filtered = best_data_filtered[:25]
+    # Data extraction
+    y_placebo_150 = [[entry[index] for entry in trial] for trial in placebo_data_150]
+    y_best_150 = [[entry[index] for entry in trial] for trial in best_data_150]
+    y_placebo_250 = [[entry[index] for entry in trial] for trial in placebo_data_250]
+    y_best_250 = [[entry[index] for entry in trial] for trial in best_data_250]
 
-    y_placebo = [x[index] for x in placebo_data_filtered]
-    x_placebo = list(range(len(y_placebo)))
+    # Create DataFrames
+    placebo_df_150 = prepare_data(y_placebo_150, "AMC+", 150)
+    best_df_150 = prepare_data(y_best_150, "Enhanced", 150)
+    placebo_df_250 = prepare_data(y_placebo_250, "AMC+", 250)
+    best_df_250 = prepare_data(y_best_250, "Enhanced", 250)
 
-    y_best = [x[index] for x in best_data_filtered]
-    x_best = list(range(len(y_best)))
+    # Combine DataFrames
+    combined_df = pd.concat([placebo_df_150, best_df_150, placebo_df_250, best_df_250])
 
-    # Use bigger width for better visibility
-    plt.figure(figsize=(10, 5))
+    # Create the box plot
+    plt.figure(figsize=(10, 10))
+    sns.boxplot(
+        x="Runnables",  # x-axis shows the number of runnables (150 and 250)
+        y="Value",  # y-axis shows the distribution of values
+        hue="Type",  # hue creates the subcolumns for AMC+ and Enhanced
+        data=combined_df,
+        palette={"AMC+": "red", "Enhanced": "green"},
+    )
 
-    # Use bigger font
-    plt.rcParams.update({"font.size": 12})
+    # Add titles and labels
+    plt.xlabel("Number of Runnables")
+    plt.ylabel(label)
+    plt.legend(title="Schedule")
 
-    # Clear the current figure
-    plt.clf()
+    # Display the plot
+    plt.tight_layout()
 
-    # Plot lines for placebo data
-    plt.plot(x_placebo, y_placebo, marker="o", label="Placebo")
-
-    # Plot lines for best data
-    plt.plot(x_best, y_best, marker="s", label="Reactive")
-
-    # Add labels and legend
-    plt.xlabel("Task set")
-    plt.ylabel(label)  # Add y-label for better understanding
-    plt.legend()
-
-    # Show all trials on x-axis
-    plt.xticks(range(len(x_placebo)), range(len(x_placebo)))
+    # Make font bigger
+    plt.rc("axes", labelsize=18)
+    plt.rc("xtick", labelsize=18)
+    plt.rc("ytick", labelsize=18)
+    plt.rc("legend", fontsize=18)
+    plt.rc("legend", title_fontsize=18)
 
     # Save the plot to a file
-    plt.savefig(f"results/{label}.png")
+    plt.savefig(f"results/{label}_comparison.png")
 
 
+read()
 plot_data(0, "Reward")
 plot_data(1, "Mode Changes")
 plot_data(2, "Task Kills")

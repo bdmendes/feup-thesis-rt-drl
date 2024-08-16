@@ -1,7 +1,4 @@
-use probability::distribution::{Pert, Sample, Triangular};
-use probability::source::Xorshift128Plus;
-
-use crate::generator::TimeSampleDistribution;
+use crate::generator::Runnable;
 
 use super::SimulatorMode;
 
@@ -15,6 +12,13 @@ pub enum Task {
 }
 
 impl Task {
+    pub fn set_id(&mut self, id: TaskId) {
+        match self {
+            Task::LTask(props) => props.id = id,
+            Task::HTask(props) => props.id = id,
+        }
+    }
+
     pub fn props(&self) -> TaskProps {
         match self {
             Task::LTask(props) => *props,
@@ -26,23 +30,6 @@ impl Task {
         match self {
             Task::LTask(props) => props,
             Task::HTask(props) => props,
-        }
-    }
-
-    pub fn sample_execution_time(
-        acet: TimeUnit,
-        bcet: TimeUnit,
-        wcet: TimeUnit,
-        source: &mut Xorshift128Plus,
-        dist: TimeSampleDistribution,
-    ) -> TimeUnit {
-        match dist {
-            TimeSampleDistribution::Triangular => {
-                Triangular::new(bcet as f64, wcet as f64, acet as f64).sample(source) as TimeUnit
-            }
-            TimeSampleDistribution::Pert => {
-                Pert::new(bcet as f64, acet as f64, wcet as f64).sample(source) as TimeUnit
-            }
         }
     }
 }
@@ -82,9 +69,11 @@ impl TaskProps {
 #[derive(Clone, Debug)]
 pub struct SimulatorTask {
     pub task: Task,
-    pub priority: TimeUnit,
-    pub acet: TimeUnit, // Average Case Execution Time
-    pub bcet: TimeUnit, // Best Case Execution Time
+    pub custom_priority: Option<u64>,
+    pub acet: TimeUnit,
+    pub bcet: TimeUnit,
+    pub next_arrival: TimeUnit,
+    pub runnables: Option<Vec<Runnable>>,
 }
 
 impl SimulatorTask {
@@ -93,9 +82,22 @@ impl SimulatorTask {
         assert!(bcet > 0, "Execution time must be greater than 0.");
         Self {
             task: task.clone(),
-            priority: task.props().period, // RMS (Rate Monotonic Scheduling)
+            custom_priority: None,
             acet,
             bcet,
+            next_arrival: task.props().offset,
+            runnables: None,
+        }
+    }
+
+    pub fn new_with_runnables(task: Task, runnables: Vec<Runnable>) -> Self {
+        Self {
+            task: task.clone(),
+            custom_priority: None,
+            acet: runnables.iter().map(|r| r.acet).sum(),
+            bcet: runnables.iter().map(|r| r.bcet).sum(),
+            next_arrival: task.props().offset,
+            runnables: Some(runnables),
         }
     }
 
@@ -103,43 +105,23 @@ impl SimulatorTask {
         assert!(acet > 0, "Execution time must be greater than 0.");
         Self {
             task: task.clone(),
-            priority,
+            custom_priority: Some(priority),
             acet,
             bcet: acet,
+            next_arrival: task.props().offset,
+            runnables: None,
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use probability::source;
-
-    #[test]
-    fn sample_time() {
-        let (bcet, acet, wcet) = (3, 10, 30);
-        let mut source = source::default(42);
-
-        for _ in 0..10000 {
-            let time = super::Task::sample_execution_time(
-                acet,
-                bcet,
-                wcet,
-                &mut source,
-                super::TimeSampleDistribution::Pert,
-            );
-            print!("{}, ", time);
+    pub fn sample_execution_time(&self) -> TimeUnit {
+        if let Some(runnables) = &self.runnables {
+            runnables.iter().map(|r| r.sample_exec_time()).sum::<f64>() as TimeUnit
+        } else {
+            self.acet
         }
-        println!("\n");
+    }
 
-        for _ in 0..10000 {
-            let time = super::Task::sample_execution_time(
-                acet,
-                bcet,
-                wcet,
-                &mut source,
-                super::TimeSampleDistribution::Triangular,
-            );
-            print!("{}, ", time);
-        }
+    pub fn priority(&self) -> TimeUnit {
+        self.custom_priority.unwrap_or_else(|| self.task.props().id)
     }
 }
