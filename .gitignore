@@ -17,7 +17,5 @@ Cargo.lock
 /target
 
 # Temp outputs
-!results/.gitkeep
-!out/.gitkeep
-out/
-results/
+out**/
+results**/

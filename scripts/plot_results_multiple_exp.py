@@ -72,26 +72,26 @@ def plot_data(index: int, label: str):
     y_best = [[entry[index] for entry in trial] for trial in best_data]
 
     # Create DataFrames
-    placebo_df = prepare_data(y_placebo, "Placebo")
-    best_df = prepare_data(y_best, "With Agent")
+    placebo_df = prepare_data(y_placebo, "AMC+")
+    best_df = prepare_data(y_best, "Enhanced")
 
     # Combine DataFrames
     combined_df = pd.concat([placebo_df, best_df])
 
     # Create the box plot
-    plt.figure(figsize=(16, 10))
+    plt.figure(figsize=(10, 10))
     sns.boxplot(
         x="Trial",
         y="Value",
         hue="Type",
         data=combined_df,
-        palette={"Placebo": "red", "With Agent": "green"},
+        palette={"AMC+": "red", "Enhanced": "green"},
     )
 
     # Add titles and labels
     plt.xlabel("Task Set")
     plt.ylabel(label)
-    plt.legend(title="Scenario")
+    plt.legend(title="Schedule")
 
     # Display the plot
     plt.tight_layout()
